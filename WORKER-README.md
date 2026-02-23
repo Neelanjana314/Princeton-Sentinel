@@ -242,7 +242,11 @@ Writes:
 
 ### Permissions
 
-- Selects stale non-folder items from `msgraph_drive_items`
+- Selects non-folder items from `msgraph_drive_items` when any of these are true:
+  - stale (`permissions_last_synced_at` older than cutoff)
+  - previously errored (`permissions_last_error_at` is set)
+  - recently updated (`modified_dt` within cutoff window)
+- Prioritizes errored items before oldest-sync items
 - Concurrently fetches `/drives/{drive}/items/{item}/permissions`
 - Rebuilds permission state per item:
   - delete existing grants/permissions for successful keys
@@ -252,6 +256,10 @@ Writes:
   - `permissions_last_synced_at`
   - `permissions_last_error_at`
   - `permissions_last_error`
+  - `permissions_last_error_details` (structured diagnostics:
+    category/status/code/message/request URL/response excerpt/run phase/attempt)
+- For `404` permission fetch errors, clears cached permission/grant rows for the item and records structured diagnostics
+- Runs one end-of-stage retry pass for keys that failed earlier in the same run
 - Contains terminal failure handling:
   - retry DB writes
   - mark batch error if writes exhaust retries

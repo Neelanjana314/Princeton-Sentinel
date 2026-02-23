@@ -198,7 +198,8 @@ const deleteHandler = async function DELETE(req: Request) {
       UPDATE msgraph_drive_items
       SET permissions_last_synced_at = now(),
           permissions_last_error_at = NULL,
-          permissions_last_error = NULL
+          permissions_last_error = NULL,
+          permissions_last_error_details = NULL
       WHERE drive_id = $1 AND id = $2
       `,
         [normalizedDriveId, normalizedItemId]

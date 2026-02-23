@@ -54,6 +54,7 @@ Compose service:
   - `permissions_last_synced_at`
   - `permissions_last_error_at`
   - `permissions_last_error`
+  - `permissions_last_error_details`
 
 ## Operational/control-plane tables
 

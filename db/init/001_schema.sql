@@ -109,6 +109,7 @@ CREATE TABLE IF NOT EXISTS msgraph_drive_items (
   permissions_last_synced_at timestamptz,
   permissions_last_error_at timestamptz,
   permissions_last_error text,
+  permissions_last_error_details jsonb,
   synced_at timestamptz,
   deleted_at timestamptz,
   raw_json jsonb,
@@ -261,6 +262,9 @@ WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_drive_items_drive_modified
 ON msgraph_drive_items (drive_id, modified_dt DESC)
 WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_drive_items_permissions_error_at
+ON msgraph_drive_items (permissions_last_error_at DESC)
+WHERE deleted_at IS NULL AND permissions_last_error_at IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_drive_items_drive_modified_user
 ON msgraph_drive_items (drive_id, modified_dt DESC, last_modified_by_user_id)
 WHERE deleted_at IS NULL;

@@ -1387,7 +1387,7 @@ def _ingest_drive_items(client: GraphClient, *, run_id: str, flush_every: int) -
            size, mime_type, file_hash_sha1, created_dt, modified_dt, created_by_user_id, created_by_display_name,
            created_by_email, last_modified_by_user_id, last_modified_by_display_name, last_modified_by_email,
            is_shared, sp_site_id, sp_list_id, sp_list_item_id, sp_list_item_unique_id,
-           permissions_last_synced_at, permissions_last_error_at, permissions_last_error,
+           permissions_last_synced_at, permissions_last_error_at, permissions_last_error, permissions_last_error_details,
            synced_at, deleted_at, raw_json)
         VALUES %s
         ON CONFLICT (drive_id, id) DO UPDATE SET
@@ -1418,6 +1418,7 @@ def _ingest_drive_items(client: GraphClient, *, run_id: str, flush_every: int) -
           permissions_last_synced_at = NULL,
           permissions_last_error_at = NULL,
           permissions_last_error = NULL,
+          permissions_last_error_details = NULL,
           synced_at = EXCLUDED.synced_at,
           deleted_at = NULL,
           raw_json = EXCLUDED.raw_json
@@ -1527,6 +1528,7 @@ def _ingest_drive_items(client: GraphClient, *, run_id: str, flush_every: int) -
                                         sp_ids.get("listId"),
                                         sp_ids.get("listItemId"),
                                         sp_ids.get("listItemUniqueId"),
+                                        None,
                                         None,
                                         None,
                                         None,
@@ -1816,6 +1818,139 @@ def _fetch_permissions(client: GraphClient, drive_id: str, item_id: str) -> list
     return list(client.iter_paged(url))
 
 
+def _truncate_text(value: Optional[str], *, max_len: int) -> Optional[str]:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    if len(text) <= max_len:
+        return text
+    return text[: max_len - 3] + "..."
+
+
+def _classify_permission_sync_error(error: Any) -> Dict[str, Any]:
+    info: Dict[str, Any] = {
+        "category": "unknown",
+        "status_code": None,
+        "graph_code": None,
+        "message": None,
+        "request_url": None,
+        "response_excerpt": None,
+        "error_type": None,
+    }
+
+    if isinstance(error, GraphError):
+        status_code = int(error.status_code)
+        parsed_graph_code: Optional[str] = None
+        parsed_graph_message: Optional[str] = None
+        if error.response_text:
+            try:
+                payload = json.loads(error.response_text)
+                payload_error = payload.get("error") if isinstance(payload, dict) else None
+                if isinstance(payload_error, dict):
+                    parsed_graph_code = _truncate_text(payload_error.get("code"), max_len=120)
+                    parsed_graph_message = _truncate_text(payload_error.get("message"), max_len=500)
+            except (ValueError, TypeError):
+                # Best-effort parse only; fall back to default GraphError fields.
+                payload_error = None
+
+        if status_code == 404:
+            category = "graph_not_found"
+        elif status_code == 403:
+            category = "graph_forbidden"
+        elif status_code == 429:
+            category = "graph_throttled"
+        elif status_code >= 500:
+            category = "graph_server_error"
+        else:
+            category = "graph_error"
+
+        info.update(
+            {
+                "category": category,
+                "status_code": status_code,
+                "graph_code": parsed_graph_code,
+                "message": _truncate_text(parsed_graph_message or error.message, max_len=500),
+                "request_url": _truncate_text(error.url, max_len=500),
+                "response_excerpt": _truncate_text(error.response_text, max_len=500),
+                "error_type": error.__class__.__name__,
+            }
+        )
+        return info
+
+    message = _truncate_text(str(error) if error is not None else None, max_len=500)
+    category = "unknown"
+    if isinstance(error, RuntimeError) and message:
+        lower_msg = message.lower()
+        if "graph request failed" in lower_msg or "graph request retries exhausted" in lower_msg:
+            category = "transport_error"
+    info.update(
+        {
+            "category": category,
+            "message": message or "permissions_fetch_failed",
+            "error_type": type(error).__name__ if error is not None else "NoneType",
+        }
+    )
+    return info
+
+
+def _build_permission_error_state(
+    *,
+    classification: Dict[str, Any],
+    run_id: str,
+    phase: str,
+    attempt_in_run: int,
+    failed_at: datetime,
+    previous_details: Optional[Dict[str, Any]],
+    extra_details: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    category = classification.get("category") or "unknown"
+    status_code = classification.get("status_code")
+    graph_code = classification.get("graph_code")
+    message = classification.get("message") or "permissions_sync_failed"
+    signature = f"{category}|{status_code if status_code is not None else ''}|{graph_code or ''}"
+
+    prev_signature = None
+    prev_consecutive = 0
+    if isinstance(previous_details, dict):
+        prev_signature = previous_details.get("last_failure_signature")
+        try:
+            prev_consecutive = int(previous_details.get("consecutive_failures") or 0)
+        except Exception:
+            prev_consecutive = 0
+
+    consecutive_failures = prev_consecutive + 1 if prev_signature == signature else 1
+    summary_parts = [category]
+    if status_code is not None:
+        summary_parts.append(f"status={status_code}")
+    if graph_code:
+        summary_parts.append(f"code={graph_code}")
+    if message:
+        summary_parts.append(f"message={message}")
+    summary = _truncate_text(" ".join(summary_parts), max_len=500) or "permissions_sync_failed"
+
+    details: Dict[str, Any] = {
+        "category": category,
+        "status_code": status_code,
+        "graph_code": graph_code,
+        "message": message,
+        "request_url": classification.get("request_url"),
+        "response_excerpt": classification.get("response_excerpt"),
+        "error_type": classification.get("error_type"),
+        "run_id": run_id,
+        "phase": phase,
+        "attempt_in_run": attempt_in_run,
+        "failed_at": failed_at.isoformat(),
+        "last_failure_signature": signature,
+        "consecutive_failures": consecutive_failures,
+    }
+    if extra_details:
+        details.update(extra_details)
+
+    return {"summary": summary, "details": details}
+
+
 def _scan_permissions(client: GraphClient, config: Dict[str, Any], *, run_id: str) -> Dict[str, Any]:
     permissions_batch_size = int(config.get("permissions_batch_size", DEFAULT_PERMISSIONS_BATCH_SIZE))
     stale_after_hours = int(config.get("permissions_stale_after_hours", DEFAULT_PERMISSIONS_STALE_AFTER_HOURS))
@@ -1870,7 +2005,8 @@ def _scan_permissions(client: GraphClient, config: Dict[str, Any], *, run_id: st
         UPDATE msgraph_drive_items d
         SET permissions_last_synced_at = v.synced_at,
             permissions_last_error_at = NULL,
-            permissions_last_error = NULL
+            permissions_last_error = NULL,
+            permissions_last_error_details = NULL
         FROM (VALUES %s) AS v(drive_id, item_id, synced_at)
         WHERE d.drive_id = v.drive_id AND d.id = v.item_id
     """
@@ -1878,8 +2014,9 @@ def _scan_permissions(client: GraphClient, config: Dict[str, Any], *, run_id: st
         UPDATE msgraph_drive_items d
         SET permissions_last_synced_at = v.synced_at,
             permissions_last_error_at = v.error_at,
-            permissions_last_error = v.error
-        FROM (VALUES %s) AS v(drive_id, item_id, synced_at, error_at, error)
+            permissions_last_error = v.error,
+            permissions_last_error_details = v.error_details
+        FROM (VALUES %s) AS v(drive_id, item_id, synced_at, error_at, error, error_details)
         WHERE d.drive_id = v.drive_id AND d.id = v.item_id
     """
 
@@ -1897,6 +2034,11 @@ def _scan_permissions(client: GraphClient, config: Dict[str, Any], *, run_id: st
     terminal_fail_count_by_key: Dict[Tuple[str, str], int] = {}
     deferred_until_success_batch: Dict[Tuple[str, str], int] = {}
     dropped_for_run: set[Tuple[str, str]] = set()
+    failed_key_attempts: Dict[Tuple[str, str], int] = {}
+    failed_keys_for_end_retry: set[Tuple[str, str]] = set()
+    end_retry_candidates = 0
+    end_retry_ok = 0
+    end_retry_err = 0
     candidate_limit = min(max(permissions_batch_size * 10, permissions_batch_size), 1000)
     terminal_retry_success_batch_delay = 5
     terminal_fail_drop_threshold = 2
@@ -1904,43 +2046,50 @@ def _scan_permissions(client: GraphClient, config: Dict[str, Any], *, run_id: st
     conn = db.get_conn()
     try:
         cur = conn.cursor()
-        while True:
+
+        def _iter_key_batches(key_rows: list[Tuple[str, str]]) -> Iterable[list[Tuple[str, str]]]:
+            for idx in range(0, len(key_rows), permissions_batch_size):
+                yield key_rows[idx : idx + permissions_batch_size]
+
+        def _load_existing_error_details(key_rows: list[Tuple[str, str]]) -> Dict[Tuple[str, str], Dict[str, Any]]:
+            if not key_rows:
+                return {}
+            placeholders = ",".join(["(%s,%s)"] * len(key_rows))
+            params: list[str] = []
+            for drive_id, item_id in key_rows:
+                params.extend([drive_id, item_id])
             cur.execute(
-                """
-                SELECT drive_id, id
+                f"""
+                SELECT drive_id, id, permissions_last_error_details
                 FROM msgraph_drive_items
-                WHERE deleted_at IS NULL
-                  AND is_folder = false
-                  AND (permissions_last_synced_at IS NULL OR permissions_last_synced_at < %s)
-                ORDER BY permissions_last_synced_at NULLS FIRST
-                LIMIT %s
+                WHERE (drive_id, id) IN ({placeholders})
                 """,
-                [cutoff, candidate_limit],
+                params,
             )
-            candidate_rows = cur.fetchall()
-            if not candidate_rows:
-                conn.commit()
-                break
+            rows = cur.fetchall()
+            details_by_key: Dict[Tuple[str, str], Dict[str, Any]] = {}
+            for drive_id, item_id, details in rows:
+                parsed_details = details
+                if isinstance(parsed_details, str):
+                    try:
+                        parsed_details = json.loads(parsed_details)
+                    except Exception:
+                        parsed_details = None
+                if isinstance(parsed_details, dict):
+                    details_by_key[(drive_id, item_id)] = parsed_details
+            return details_by_key
 
-            candidate_keys = sorted([(row[0], row[1]) for row in candidate_rows], key=lambda r: (r[0], r[1]))
-            keys: list[Tuple[str, str]] = []
-            for key in candidate_keys:
-                if key in dropped_for_run:
-                    continue
-                eligible_after = deferred_until_success_batch.get(key)
-                if eligible_after is not None and successful_db_batches < eligible_after:
-                    continue
-                keys.append(key)
-                if len(keys) >= permissions_batch_size:
-                    break
+        def _mark_key_sync_success(key: Tuple[str, str]):
+            failed_keys_for_end_retry.discard(key)
+            failed_key_attempts.pop(key, None)
 
-            if not keys:
-                conn.commit()
-                break
+        def _register_key_failure(key: Tuple[str, str]) -> int:
+            attempt_in_run = failed_key_attempts.get(key, 0) + 1
+            failed_key_attempts[key] = attempt_in_run
+            failed_keys_for_end_retry.add(key)
+            return attempt_in_run
 
-            batches += 1
-            items_processed += len(keys)
-
+        def _collect_permission_results(keys: list[Tuple[str, str]]) -> Dict[Tuple[str, str], Dict[str, Any]]:
             results: Dict[Tuple[str, str], Dict[str, Any]] = {}
             if GRAPH_MAX_CONCURRENCY > 1:
                 with ThreadPoolExecutor(max_workers=GRAPH_MAX_CONCURRENCY) as executor:
@@ -1953,25 +2102,38 @@ def _scan_permissions(client: GraphClient, config: Dict[str, Any], *, run_id: st
                         try:
                             results[(drive_id, item_id)] = {"ok": True, "permissions": future.result()}
                         except Exception as exc:
-                            results[(drive_id, item_id)] = {"ok": False, "error": str(exc)}
+                            results[(drive_id, item_id)] = {"ok": False, "error": exc}
             else:
                 for drive_id, item_id in keys:
                     try:
-                        results[(drive_id, item_id)] = {"ok": True, "permissions": _fetch_permissions(client, drive_id, item_id)}
+                        results[(drive_id, item_id)] = {
+                            "ok": True,
+                            "permissions": _fetch_permissions(client, drive_id, item_id),
+                        }
                     except Exception as exc:
-                        results[(drive_id, item_id)] = {"ok": False, "error": str(exc)}
+                        results[(drive_id, item_id)] = {"ok": False, "error": exc}
+            return results
 
+        def _prepare_batch_payload(
+            keys: list[Tuple[str, str]],
+            *,
+            phase: str,
+            existing_error_details: Dict[Tuple[str, str], Dict[str, Any]],
+        ) -> Dict[str, Any]:
+            results = _collect_permission_results(keys)
             ok_keys: list[tuple] = []
             ok_updates: list[tuple] = []
             err_updates: list[tuple] = []
             permission_rows: list[tuple] = []
             grant_rows: list[tuple] = []
+            not_found_cleanup_keys: list[Tuple[str, str]] = []
             sample_errors: list[dict] = []
 
             for drive_id, item_id in keys:
-                res = results.get((drive_id, item_id)) or {}
+                key = (drive_id, item_id)
+                res = results.get(key) or {}
                 if res.get("ok"):
-                    ok_keys.append((drive_id, item_id))
+                    ok_keys.append(key)
                     ok_updates.append((drive_id, item_id, synced_at))
                     perms = res.get("permissions") or []
                     for perm in perms:
@@ -2015,27 +2177,164 @@ def _scan_permissions(client: GraphClient, config: Dict[str, Any], *, run_id: st
                                     db.jsonb(grant.get("raw") or {}),
                                 )
                             )
-                else:
-                    err = (res.get("error") or "permissions_fetch_failed")[:500]
-                    err_updates.append((drive_id, item_id, synced_at, synced_at, err))
-                    if len(sample_errors) < 5:
-                        sample_errors.append({"drive_id": drive_id, "item_id": item_id, "error": err})
+                    continue
+
+                failed_at = datetime.now(timezone.utc)
+                classification = _classify_permission_sync_error(res.get("error"))
+                attempt_in_run = _register_key_failure(key)
+                state = _build_permission_error_state(
+                    classification=classification,
+                    run_id=run_id,
+                    phase=phase,
+                    attempt_in_run=attempt_in_run,
+                    failed_at=failed_at,
+                    previous_details=existing_error_details.get(key),
+                )
+                err_updates.append((drive_id, item_id, synced_at, failed_at, state["summary"], db.jsonb(state["details"])))
+                if classification.get("category") == "graph_not_found":
+                    not_found_cleanup_keys.append(key)
+                if len(sample_errors) < 5:
+                    sample_errors.append(
+                        {
+                            "drive_id": drive_id,
+                            "item_id": item_id,
+                            "category": classification.get("category"),
+                            "status_code": classification.get("status_code"),
+                            "graph_code": classification.get("graph_code"),
+                            "error": state["summary"],
+                        }
+                    )
 
             ok_keys.sort(key=lambda r: (r[0], r[1]))
             ok_updates.sort(key=lambda r: (r[0], r[1]))
             err_updates.sort(key=lambda r: (r[0], r[1]))
             if permission_rows:
-                permission_rows, dropped = _dedupe_rows_keep_last(
-                    permission_rows, key_fn=lambda r: (r[0], r[1], r[2])
-                )
-                dropped_permission_duplicates += dropped
+                deduped_rows, dropped = _dedupe_rows_keep_last(permission_rows, key_fn=lambda r: (r[0], r[1], r[2]))
+                permission_rows = deduped_rows
                 permission_rows.sort(key=lambda r: (r[0], r[1], r[2]))
+            else:
+                dropped = 0
+            dropped_permissions = dropped
             if grant_rows:
-                grant_rows, dropped = _dedupe_rows_keep_last(
-                    grant_rows, key_fn=lambda r: (r[0], r[1], r[2], r[3], r[4])
-                )
-                dropped_grant_duplicates += dropped
+                deduped_rows, dropped = _dedupe_rows_keep_last(grant_rows, key_fn=lambda r: (r[0], r[1], r[2], r[3], r[4]))
+                grant_rows = deduped_rows
                 grant_rows.sort(key=lambda r: (r[0], r[1], r[2], r[3], r[4]))
+            else:
+                dropped = 0
+            dropped_grants = dropped
+
+            not_found_cleanup_keys = sorted(set(not_found_cleanup_keys), key=lambda r: (r[0], r[1]))
+            return {
+                "ok_keys": ok_keys,
+                "ok_updates": ok_updates,
+                "err_updates": err_updates,
+                "permission_rows": permission_rows,
+                "grant_rows": grant_rows,
+                "not_found_cleanup_keys": not_found_cleanup_keys,
+                "sample_errors": sample_errors,
+                "dropped_permissions": dropped_permissions,
+                "dropped_grants": dropped_grants,
+            }
+
+        def _build_db_write_exhausted_err_updates(
+            keys: list[Tuple[str, str]],
+            *,
+            phase: str,
+            sqlstate: Optional[str],
+            write_error: Optional[str],
+            existing_error_details: Dict[Tuple[str, str], Dict[str, Any]],
+            operation: str,
+        ) -> list[tuple]:
+            updates: list[tuple] = []
+            msg_suffix = _truncate_text(write_error, max_len=320)
+            for drive_id, item_id in keys:
+                key = (drive_id, item_id)
+                failed_at = datetime.now(timezone.utc)
+                attempt_in_run = _register_key_failure(key)
+                classification = {
+                    "category": "db_write_error",
+                    "status_code": None,
+                    "graph_code": sqlstate,
+                    "message": f"db_write_retry_exhausted:{sqlstate or 'unknown'}"
+                    + (f" {msg_suffix}" if msg_suffix else ""),
+                    "request_url": None,
+                    "response_excerpt": None,
+                    "error_type": "DBWriteError",
+                }
+                state = _build_permission_error_state(
+                    classification=classification,
+                    run_id=run_id,
+                    phase=phase,
+                    attempt_in_run=attempt_in_run,
+                    failed_at=failed_at,
+                    previous_details=existing_error_details.get(key),
+                    extra_details={"operation": operation, "sqlstate": sqlstate},
+                )
+                updates.append((drive_id, item_id, synced_at, failed_at, state["summary"], db.jsonb(state["details"])))
+            updates.sort(key=lambda r: (r[0], r[1]))
+            return updates
+
+        while True:
+            cur.execute(
+                """
+                SELECT drive_id, id
+                FROM msgraph_drive_items
+                WHERE deleted_at IS NULL
+                  AND is_folder = false
+                  AND (
+                    permissions_last_synced_at IS NULL
+                    OR permissions_last_synced_at < %s
+                    OR (
+                      permissions_last_error_at IS NOT NULL
+                      AND (permissions_last_synced_at IS NULL OR permissions_last_synced_at < %s)
+                    )
+                    OR (
+                      modified_dt IS NOT NULL
+                      AND modified_dt >= %s
+                      AND (permissions_last_synced_at IS NULL OR permissions_last_synced_at < %s)
+                    )
+                  )
+                ORDER BY
+                  CASE WHEN permissions_last_error_at IS NOT NULL THEN 0 ELSE 1 END,
+                  permissions_last_synced_at NULLS FIRST
+                LIMIT %s
+                """,
+                [cutoff, synced_at, cutoff, synced_at, candidate_limit],
+            )
+            candidate_rows = cur.fetchall()
+            if not candidate_rows:
+                conn.commit()
+                break
+
+            candidate_keys = sorted([(row[0], row[1]) for row in candidate_rows], key=lambda r: (r[0], r[1]))
+            keys: list[Tuple[str, str]] = []
+            for key in candidate_keys:
+                if key in dropped_for_run:
+                    continue
+                eligible_after = deferred_until_success_batch.get(key)
+                if eligible_after is not None and successful_db_batches < eligible_after:
+                    continue
+                keys.append(key)
+                if len(keys) >= permissions_batch_size:
+                    break
+
+            if not keys:
+                conn.commit()
+                break
+
+            batches += 1
+            items_processed += len(keys)
+            existing_error_details = _load_existing_error_details(keys)
+            payload = _prepare_batch_payload(keys, phase="primary", existing_error_details=existing_error_details)
+            ok_keys = payload["ok_keys"]
+            ok_updates = payload["ok_updates"]
+            err_updates = payload["err_updates"]
+            permission_rows = payload["permission_rows"]
+            grant_rows = payload["grant_rows"]
+            not_found_cleanup_keys = payload["not_found_cleanup_keys"]
+            sample_errors = payload["sample_errors"]
+            dropped_permission_duplicates += payload["dropped_permissions"]
+            dropped_grant_duplicates += payload["dropped_grants"]
 
             def write_batch():
                 if ok_keys:
@@ -2046,6 +2345,10 @@ def _scan_permissions(client: GraphClient, config: Dict[str, Any], *, run_id: st
                     if grant_rows:
                         db.execute_values(cur, insert_grants_sql, grant_rows)
                     db.execute_values(cur, update_items_ok_sql, ok_updates)
+
+                if not_found_cleanup_keys:
+                    db.execute_values(cur, delete_grants_sql, not_found_cleanup_keys)
+                    db.execute_values(cur, delete_permissions_sql, not_found_cleanup_keys)
 
                 if err_updates:
                     db.execute_values(cur, update_items_err_sql, err_updates)
@@ -2064,9 +2367,10 @@ def _scan_permissions(client: GraphClient, config: Dict[str, Any], *, run_id: st
                     deferred_until_success_batch.pop(key, None)
                 items_ok += len(ok_updates)
                 items_err += len(err_updates)
+                for key in ok_keys:
+                    _mark_key_sync_success(key)
             else:
                 db_retry_exhausted_batches += 1
-                exhausted_error = f"db_write_retry_exhausted:{sqlstate or 'unknown'}"
                 emit(
                     "WARN",
                     "GRAPH",
@@ -2084,10 +2388,14 @@ def _scan_permissions(client: GraphClient, config: Dict[str, Any], *, run_id: st
                     },
                 )
 
-                fallback_err_updates = [
-                    (drive_id, item_id, synced_at, synced_at, exhausted_error)
-                    for drive_id, item_id in keys
-                ]
+                fallback_err_updates = _build_db_write_exhausted_err_updates(
+                    keys,
+                    phase="primary",
+                    sqlstate=sqlstate,
+                    write_error=write_error,
+                    existing_error_details=existing_error_details,
+                    operation=f"permissions_batch:{batches}",
+                )
 
                 def mark_batch_error():
                     if fallback_err_updates:
@@ -2215,9 +2523,159 @@ def _scan_permissions(client: GraphClient, config: Dict[str, Any], *, run_id: st
                     context={"batch": batches, "errors": len(err_updates), "sample": sample_errors},
                 )
 
+        pending_end_retry_keys = sorted(list(failed_keys_for_end_retry), key=lambda r: (r[0], r[1]))
+        end_retry_candidates = len(pending_end_retry_keys)
+        if pending_end_retry_keys:
+            emit(
+                "INFO",
+                "GRAPH",
+                f"Permissions end-of-run retry started: candidates={end_retry_candidates}",
+            )
+            for retry_batch_num, retry_keys in enumerate(_iter_key_batches(pending_end_retry_keys), start=1):
+                items_processed += len(retry_keys)
+                existing_error_details = _load_existing_error_details(retry_keys)
+                payload = _prepare_batch_payload(
+                    retry_keys,
+                    phase="final_retry",
+                    existing_error_details=existing_error_details,
+                )
+                ok_keys = payload["ok_keys"]
+                ok_updates = payload["ok_updates"]
+                err_updates = payload["err_updates"]
+                permission_rows = payload["permission_rows"]
+                grant_rows = payload["grant_rows"]
+                not_found_cleanup_keys = payload["not_found_cleanup_keys"]
+                sample_errors = payload["sample_errors"]
+                dropped_permission_duplicates += payload["dropped_permissions"]
+                dropped_grant_duplicates += payload["dropped_grants"]
+
+                def write_final_retry_batch():
+                    if ok_keys:
+                        db.execute_values(cur, delete_grants_sql, ok_keys)
+                        db.execute_values(cur, delete_permissions_sql, ok_keys)
+                        if permission_rows:
+                            db.execute_values(cur, insert_permissions_sql, permission_rows)
+                        if grant_rows:
+                            db.execute_values(cur, insert_grants_sql, grant_rows)
+                        db.execute_values(cur, update_items_ok_sql, ok_updates)
+
+                    if not_found_cleanup_keys:
+                        db.execute_values(cur, delete_grants_sql, not_found_cleanup_keys)
+                        db.execute_values(cur, delete_permissions_sql, not_found_cleanup_keys)
+
+                    if err_updates:
+                        db.execute_values(cur, update_items_err_sql, err_updates)
+
+                write_success, retries, sqlstate, write_error = _execute_db_mutation_with_retry(
+                    conn,
+                    run_id=run_id,
+                    op_name=f"permissions_final_retry_batch:{retry_batch_num}",
+                    retry_log_message="permissions_db_write_retry",
+                    mutation_fn=write_final_retry_batch,
+                )
+                db_retry_attempts += retries
+                if write_success:
+                    successful_db_batches += 1
+                    items_ok += len(ok_updates)
+                    items_err += len(err_updates)
+                    end_retry_ok += len(ok_updates)
+                    end_retry_err += len(err_updates)
+                    for key in ok_keys:
+                        _mark_key_sync_success(key)
+                else:
+                    db_retry_exhausted_batches += 1
+                    emit(
+                        "WARN",
+                        "GRAPH",
+                        (
+                            f"Permissions final retry batch write retries exhausted: batch={retry_batch_num} "
+                            f"items={len(retry_keys)} sqlstate={sqlstate} error={write_error}"
+                        ),
+                    )
+                    log_job_run_log(
+                        run_id=run_id,
+                        level="WARN",
+                        message="permissions_db_write_retry_exhausted",
+                        context={
+                            "batch": retry_batch_num,
+                            "operation": "final_retry_batch",
+                            "items": len(retry_keys),
+                            "sqlstate": sqlstate,
+                            "error": write_error,
+                        },
+                    )
+
+                    fallback_err_updates = _build_db_write_exhausted_err_updates(
+                        retry_keys,
+                        phase="final_retry",
+                        sqlstate=sqlstate,
+                        write_error=write_error,
+                        existing_error_details=existing_error_details,
+                        operation=f"permissions_final_retry_batch:{retry_batch_num}",
+                    )
+
+                    def mark_final_retry_error():
+                        if fallback_err_updates:
+                            db.execute_values(cur, update_items_err_sql, fallback_err_updates)
+
+                    mark_success, mark_retries, mark_sqlstate, mark_error = _execute_db_mutation_with_retry(
+                        conn,
+                        run_id=run_id,
+                        op_name=f"permissions_final_retry_batch_mark_error:{retry_batch_num}",
+                        retry_log_message="permissions_db_write_retry",
+                        mutation_fn=mark_final_retry_error,
+                    )
+                    db_retry_attempts += mark_retries
+                    if mark_success:
+                        items_err += len(fallback_err_updates)
+                        end_retry_err += len(fallback_err_updates)
+                    else:
+                        end_retry_err += len(retry_keys)
+                        emit(
+                            "WARN",
+                            "GRAPH",
+                            (
+                                f"Permissions final retry mark-error retries exhausted: batch={retry_batch_num} "
+                                f"sqlstate={mark_sqlstate} error={mark_error}"
+                            ),
+                        )
+                        log_job_run_log(
+                            run_id=run_id,
+                            level="WARN",
+                            message="permissions_db_write_retry_exhausted",
+                            context={
+                                "batch": retry_batch_num,
+                                "operation": "final_retry_mark_batch_error",
+                                "sqlstate": mark_sqlstate,
+                                "error": mark_error,
+                            },
+                        )
+
+                if err_updates:
+                    emit(
+                        "WARN",
+                        "GRAPH",
+                        (
+                            f"Permissions final retry batch finished with item errors: "
+                            f"batch={retry_batch_num} errors={len(err_updates)}"
+                        ),
+                    )
+                    log_job_run_log(
+                        run_id=run_id,
+                        level="WARN",
+                        message="permissions_batch_errors",
+                        context={
+                            "batch": retry_batch_num,
+                            "phase": "final_retry",
+                            "errors": len(err_updates),
+                            "sample": sample_errors,
+                        },
+                    )
+
         terminal_deferred_keys = len(deferred_until_success_batch)
         terminal_dropped_keys = len(dropped_for_run)
         terminal_keys_pending_end_of_run = terminal_deferred_keys
+        end_retry_remaining = len(failed_keys_for_end_retry)
         if terminal_keys_pending_end_of_run > 0:
             emit(
                 "WARN",
@@ -2263,6 +2721,10 @@ def _scan_permissions(client: GraphClient, config: Dict[str, Any], *, run_id: st
                 "terminal_dropped_keys": terminal_dropped_keys,
                 "terminal_retry_requeues": terminal_retry_requeues,
                 "terminal_keys_pending_end_of_run": terminal_keys_pending_end_of_run,
+                "end_retry_candidates": end_retry_candidates,
+                "end_retry_ok": end_retry_ok,
+                "end_retry_err": end_retry_err,
+                "end_retry_remaining": end_retry_remaining,
             },
         )
         return {
@@ -2280,6 +2742,10 @@ def _scan_permissions(client: GraphClient, config: Dict[str, Any], *, run_id: st
             "terminal_dropped_keys": terminal_dropped_keys,
             "terminal_retry_requeues": terminal_retry_requeues,
             "terminal_keys_pending_end_of_run": terminal_keys_pending_end_of_run,
+            "end_retry_candidates": end_retry_candidates,
+            "end_retry_ok": end_retry_ok,
+            "end_retry_err": end_retry_err,
+            "end_retry_remaining": end_retry_remaining,
         }
     finally:
         conn.close()
