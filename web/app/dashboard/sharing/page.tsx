@@ -18,7 +18,7 @@ function buildSearchFilter(search: string | null) {
   if (!search) return { clause: "", params: [] as any[] };
   return {
     clause:
-      "WHERE (LOWER(title) LIKE $1 OR LOWER(web_url) LIKE $1 OR LOWER(site_id) LIKE $1 OR LOWER(route_drive_id) LIKE $1 OR LOWER(site_key) LIKE $1)",
+      "WHERE (LOWER(i.title) LIKE $1 OR LOWER(i.web_url) LIKE $1 OR LOWER(i.site_id) LIKE $1 OR LOWER(i.route_drive_id) LIKE $1 OR LOWER(i.site_key) LIKE $1)",
     params: [`%${search.toLowerCase()}%`],
   };
 }
@@ -65,7 +65,7 @@ async function SharingPage({ searchParams }: { searchParams?: Promise<SearchPara
       LIMIT 10
       `
     ),
-    query<any>("SELECT COUNT(*)::int AS total FROM mv_msgraph_routable_site_drives " + clause, params),
+    query<any>("SELECT COUNT(*)::int AS total FROM mv_msgraph_routable_site_drives i " + clause, params),
     query<any>(
       `
       SELECT
