@@ -10,9 +10,12 @@
   },
   "include": [
     "tests/**/*.ts",
+    "tests/**/*.tsx",
     "app/lib/cron.ts",
     "app/lib/request-body.ts",
-    "app/api/internal/worker-heartbeat/route.ts"
+    "app/api/internal/worker-heartbeat/route.ts",
+    "app/lib/version.ts",
+    "app/admin/AdminVersionBadge.tsx"
   ],
   "exclude": [
     "node_modules"

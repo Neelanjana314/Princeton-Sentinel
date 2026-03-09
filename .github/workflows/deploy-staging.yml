@@ -5,6 +5,15 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      release_type:
+        description: Version bump to apply before deploy
+        required: false
+        default: auto
+        type: choice
+        options:
+          - auto
+          - major
 
 concurrency:
   group: deploy-staging
@@ -12,7 +21,7 @@ concurrency:
 
 permissions:
   id-token: write
-  contents: read
+  contents: write
 
 env:
   AZ_RESOURCE_GROUP: ${{ vars.AZ_RESOURCE_GROUP }}
@@ -30,6 +39,9 @@ jobs:
       db_sql_changed: ${{ steps.changes.outputs.db_sql_changed }}
       reason: ${{ steps.changes.outputs.reason }}
       changed_paths: ${{ steps.changes.outputs.changed_paths }}
+      skip_workflow: ${{ steps.changes.outputs.skip_workflow }}
+      commit_title: ${{ steps.changes.outputs.commit_title }}
+      release_type: ${{ steps.changes.outputs.release_type }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -42,37 +54,44 @@ jobs:
         run: |
           set -euo pipefail
 
+          skip_workflow=false
           deploy_web=false
           deploy_worker=false
+          any=false
           db_sql_changed=false
           reason=""
           changed_paths=""
+          commit_title="$(git log -1 --pretty=%s)"
+          release_type="auto"
 
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            release_type="${{ github.event.inputs.release_type || 'auto' }}"
+          fi
+
+          if [[ "${{ github.event_name }}" == "push" ]] && git log -1 --pretty=%B | grep -Fq "[skip version]"; then
+            skip_workflow=true
+            reason="skip marker detected on automation commit"
+            changed_paths="workflow skipped"
+          elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             deploy_web=true
             deploy_worker=true
-            db_sql_changed=false
-            reason="workflow_dispatch"
+            any=true
+            reason="workflow_dispatch release_type=${release_type}"
             changed_paths="workflow_dispatch"
           else
             before="${{ github.event.before }}"
+            deploy_web=true
+            deploy_worker=true
+            any=true
             if [[ -z "${before}" || "${before}" == "0000000000000000000000000000000000000000" ]]; then
-              deploy_web=true
-              deploy_worker=true
-              reason="no before SHA available; deploying both"
+              reason="no before SHA available; versioned deploy"
               changed_paths="unknown"
             elif ! git cat-file -e "${before}^{commit}" 2>/dev/null; then
-              deploy_web=true
-              deploy_worker=true
-              reason="before SHA missing locally; deploying both"
+              reason="before SHA missing locally; versioned deploy"
               changed_paths="unknown"
             else
               mapfile -t paths < <(git diff --name-only "${before}" "${GITHUB_SHA}")
               for path in "${paths[@]}"; do
-                case "${path}" in
-                  web/*) deploy_web=true ;;
-                  worker/*) deploy_worker=true ;;
-                esac
                 if [[ "${path}" =~ ^db/.+\.sql$ ]]; then
                   db_sql_changed=true
                 fi
@@ -80,14 +99,8 @@ jobs:
               if [[ ${#paths[@]} -gt 0 ]]; then
                 changed_paths="$(printf '%s\n' "${paths[@]}" | paste -sd ',' -)"
               fi
-              reason="diff ${before}..${GITHUB_SHA}"
+              reason="versioned deploy for diff ${before}..${GITHUB_SHA}"
             fi
-          fi
-
-          if [[ "${deploy_web}" == "true" || "${deploy_worker}" == "true" ]]; then
-            any=true
-          else
-            any=false
           fi
 
           echo "deploy_web=${deploy_web}" >> "${GITHUB_OUTPUT}"
@@ -96,6 +109,13 @@ jobs:
           echo "db_sql_changed=${db_sql_changed}" >> "${GITHUB_OUTPUT}"
           echo "reason=${reason}" >> "${GITHUB_OUTPUT}"
           echo "changed_paths=${changed_paths}" >> "${GITHUB_OUTPUT}"
+          echo "skip_workflow=${skip_workflow}" >> "${GITHUB_OUTPUT}"
+          echo "release_type=${release_type}" >> "${GITHUB_OUTPUT}"
+          {
+            echo "commit_title<<EOF"
+            echo "${commit_title}"
+            echo "EOF"
+          } >> "${GITHUB_OUTPUT}"
 
       - name: Show deployment decision
         shell: bash
@@ -106,6 +126,9 @@ jobs:
           echo "db_sql_changed=${{ steps.changes.outputs.db_sql_changed }}"
           echo "reason=${{ steps.changes.outputs.reason }}"
           echo "changed_paths=${{ steps.changes.outputs.changed_paths }}"
+          echo "skip_workflow=${{ steps.changes.outputs.skip_workflow }}"
+          echo "release_type=${{ steps.changes.outputs.release_type }}"
+          echo "commit_title=${{ steps.changes.outputs.commit_title }}"
 
   await_db_migration_approval:
     needs: detect_changes
@@ -122,7 +145,7 @@ jobs:
 
   deploy:
     needs: [detect_changes, await_db_migration_approval]
-    if: ${{ always() && (needs.detect_changes.outputs.db_sql_changed != 'true' || needs.await_db_migration_approval.result == 'success') }}
+    if: ${{ always() && needs.detect_changes.outputs.skip_workflow != 'true' && (needs.detect_changes.outputs.db_sql_changed != 'true' || needs.await_db_migration_approval.result == 'success') }}
     runs-on: ubuntu-latest
     environment: staging
     steps:
@@ -139,6 +162,25 @@ jobs:
           cache: "npm"
           cache-dependency-path: web/package-lock.json
 
+      - name: Compute app version
+        if: needs.detect_changes.outputs.any == 'true'
+        shell: bash
+        env:
+          RELEASE_TYPE: ${{ needs.detect_changes.outputs.release_type }}
+          COMMIT_TITLE: ${{ needs.detect_changes.outputs.commit_title }}
+        run: |
+          set -euo pipefail
+          CURRENT_VERSION="$(node -p "require('./web/package.json').version")"
+          NEXT_VERSION="$(node web/scripts/compute-app-version.cjs "${CURRENT_VERSION}" "${RELEASE_TYPE}" "${COMMIT_TITLE}")"
+          echo "APP_VERSION=${NEXT_VERSION}" >> "${GITHUB_ENV}"
+          cd web
+          npm version --no-git-tag-version "${NEXT_VERSION}"
+
+      - name: Show app version
+        if: needs.detect_changes.outputs.any == 'true'
+        shell: bash
+        run: echo "APP_VERSION=${APP_VERSION}"
+
       - name: Web checks (tests + build)
         if: needs.detect_changes.outputs.deploy_web == 'true'
         shell: bash
@@ -146,8 +188,8 @@ jobs:
           set -euo pipefail
           cd web
           npm ci
-          npm test
-          npm run build
+          APP_VERSION="${APP_VERSION}" npm test
+          APP_VERSION="${APP_VERSION}" npm run build
 
       - name: Setup Python
         if: needs.detect_changes.outputs.deploy_worker == 'true'
@@ -334,6 +376,7 @@ jobs:
             --name "${AZ_WEB_APP_NAME}" \
             --resource-group "${AZ_RESOURCE_GROUP}" \
             --set-env-vars \
+              APP_VERSION="${APP_VERSION}" \
               DATABASE_URL=secretref:dburl \
               WORKER_API_URL="${WORKER_API_URL}" \
               WORKER_INTERNAL_API_TOKEN=secretref:workerinternaltoken \
@@ -395,6 +438,7 @@ jobs:
             --name "${AZ_WORKER_APP_NAME}" \
             --resource-group "${AZ_RESOURCE_GROUP}" \
             --set-env-vars \
+              APP_VERSION="${APP_VERSION}" \
               DATABASE_URL=secretref:dburl \
               WORKER_INTERNAL_API_TOKEN=secretref:workerinternaltoken \
               WORKER_HEARTBEAT_TOKEN=secretref:workerheartbeattoken \
@@ -501,7 +545,25 @@ jobs:
               --output table
           fi
 
+      - name: Persist version files
+        if: needs.detect_changes.outputs.any == 'true'
+        shell: bash
+        env:
+          BRANCH_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- web/package.json web/package-lock.json; then
+            echo "Version files already match ${APP_VERSION}."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add web/package.json web/package-lock.json
+          git commit -m "chore: release ${APP_VERSION} [skip version]"
+          git push origin "HEAD:${BRANCH_NAME}"
+
       - name: Skip deploy when no app changes are detected
         if: needs.detect_changes.outputs.any != 'true'
         shell: bash
-        run: echo "No changes under web/ or worker/. Skipping staging deployment."
+        run: echo "Skipping deploy for automation version commit."
