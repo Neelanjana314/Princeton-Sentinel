@@ -78,6 +78,20 @@ function readVersionFromGit(revision, filePath) {
   return extractVersionFromWorkflow(contents);
 }
 
+function readVersionFromGitOrDefault(revision, filePath, defaultVersion) {
+  parseVersion(defaultVersion);
+
+  try {
+    return readVersionFromGit(revision, filePath);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.includes("Missing top-level env.STAGING_VERSION")) {
+      return defaultVersion;
+    }
+    throw error;
+  }
+}
+
 function main(argv) {
   const [, , command, ...args] = argv;
 
@@ -104,8 +118,14 @@ function main(argv) {
         process.stdout.write(result);
       }
       return;
+    case "from-git-or-default":
+      if (args.length !== 3) {
+        throw new Error("Usage: staging-version.cjs from-git-or-default <revision> <path> <default>");
+      }
+      process.stdout.write(readVersionFromGitOrDefault(args[0], args[1], args[2]));
+      return;
     default:
-      throw new Error("Usage: staging-version.cjs <from-file|from-git|compare> ...");
+      throw new Error("Usage: staging-version.cjs <from-file|from-git|from-git-or-default|compare> ...");
   }
 }
 
@@ -123,4 +143,5 @@ module.exports = {
   compareVersions,
   extractVersionFromWorkflow,
   parseVersion,
+  readVersionFromGitOrDefault,
 };

@@ -5,12 +5,6 @@ on:
     branches:
       - main
   workflow_dispatch:
-    inputs:
-      redeploy_same_version:
-        description: Allow redeploy with the current STAGING_VERSION
-        required: false
-        default: false
-        type: boolean
 
 concurrency:
   group: deploy-staging
@@ -37,7 +31,6 @@ jobs:
       db_sql_changed: ${{ steps.changes.outputs.db_sql_changed }}
       reason: ${{ steps.changes.outputs.reason }}
       changed_paths: ${{ steps.changes.outputs.changed_paths }}
-      allow_same_version: ${{ steps.changes.outputs.allow_same_version }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -56,16 +49,12 @@ jobs:
           db_sql_changed=false
           reason=""
           changed_paths=""
-          allow_same_version=false
 
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             deploy_web=true
             deploy_worker=true
             any=true
-            if [[ "${{ github.event.inputs.redeploy_same_version }}" == "true" ]]; then
-              allow_same_version=true
-            fi
-            reason="workflow_dispatch redeploy_same_version=${allow_same_version}"
+            reason="workflow_dispatch"
             changed_paths="workflow_dispatch"
           else
             before="${{ github.event.before }}"
@@ -98,7 +87,6 @@ jobs:
           echo "db_sql_changed=${db_sql_changed}" >> "${GITHUB_OUTPUT}"
           echo "reason=${reason}" >> "${GITHUB_OUTPUT}"
           echo "changed_paths=${changed_paths}" >> "${GITHUB_OUTPUT}"
-          echo "allow_same_version=${allow_same_version}" >> "${GITHUB_OUTPUT}"
 
       - name: Show deployment decision
         shell: bash
@@ -109,7 +97,6 @@ jobs:
           echo "db_sql_changed=${{ steps.changes.outputs.db_sql_changed }}"
           echo "reason=${{ steps.changes.outputs.reason }}"
           echo "changed_paths=${{ steps.changes.outputs.changed_paths }}"
-          echo "allow_same_version=${{ steps.changes.outputs.allow_same_version }}"
 
   await_db_migration_approval:
     needs: detect_changes
@@ -135,43 +122,13 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Validate staging version
+      - name: Export app version
         if: needs.detect_changes.outputs.any == 'true'
         shell: bash
-        env:
-          ALLOW_SAME_VERSION: ${{ needs.detect_changes.outputs.allow_same_version }}
-          BEFORE_SHA: ${{ github.event.before }}
         run: |
           set -euo pipefail
-
           APP_VERSION="$(node scripts/staging-version.cjs from-file .github/workflows/deploy-staging.yml)"
           echo "APP_VERSION=${APP_VERSION}" >> "${GITHUB_ENV}"
-
-          if [[ "${ALLOW_SAME_VERSION}" == "true" ]]; then
-            echo "Manual redeploy requested; allowing STAGING_VERSION=${APP_VERSION} without comparison."
-            exit 0
-          fi
-
-          BASELINE_SHA="${BEFORE_SHA}"
-          if [[ -z "${BASELINE_SHA}" || "${BASELINE_SHA}" == "0000000000000000000000000000000000000000" ]]; then
-            BASELINE_SHA="$(git rev-parse HEAD^ 2>/dev/null || true)"
-          fi
-
-          if [[ -z "${BASELINE_SHA}" ]]; then
-            echo "Unable to determine the previous main commit for STAGING_VERSION comparison." >&2
-            exit 1
-          fi
-
-          PREVIOUS_VERSION="$(node scripts/staging-version.cjs from-git "${BASELINE_SHA}" .github/workflows/deploy-staging.yml)"
-          COMPARISON="$(node scripts/staging-version.cjs compare "${APP_VERSION}" "${PREVIOUS_VERSION}")"
-
-          echo "Current STAGING_VERSION=${APP_VERSION}"
-          echo "Previous STAGING_VERSION=${PREVIOUS_VERSION}"
-
-          if [[ "${COMPARISON}" != "gt" ]]; then
-            echo "STAGING_VERSION must be strictly greater than the previous main version." >&2
-            exit 1
-          fi
 
       - name: Setup Node.js
         if: needs.detect_changes.outputs.deploy_web == 'true'
