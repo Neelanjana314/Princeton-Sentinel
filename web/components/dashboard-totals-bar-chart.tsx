@@ -13,8 +13,8 @@ export function DashboardTotalsBarChart({
   totals: { sites: number; users: number; groups: number; drives: number };
 }) {
   const router = useRouter();
-  const labels = ["Sites", "Users", "Groups", "Drives"];
-  const pageLinks = ["/dashboard/sites", "/dashboard/users", "/dashboard/groups", "/dashboard/sites"];
+  const labels = ["Sharepoint Sites", "Active Users", "Groups", "Drives"];
+  const pageLinks = ["/dashboard/sites", "/dashboard/users", "/dashboard/groups", null];
   const data = {
     labels,
     datasets: [
@@ -32,8 +32,9 @@ export function DashboardTotalsBarChart({
     onClick: (_event: any, elements: any[]) => {
       if (elements && elements.length > 0) {
         const barIndex = elements[0].index;
-        if (pageLinks[barIndex]) {
-          router.push(pageLinks[barIndex]);
+        const href = pageLinks[barIndex];
+        if (href) {
+          router.push(href);
         }
       }
     },
