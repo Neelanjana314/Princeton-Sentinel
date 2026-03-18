@@ -15,7 +15,7 @@ permissions:
   contents: read
 
 env:
-  STAGING_VERSION: 3.0.0
+  STAGING_VERSION: 3.0.1
   AZ_RESOURCE_GROUP: ${{ vars.AZ_RESOURCE_GROUP }}
   AZ_ACR_NAME: ${{ vars.AZ_ACR_NAME }}
   AZ_WEB_APP_NAME: ${{ vars.AZ_WEB_APP_NAME }}
@@ -58,26 +58,38 @@ jobs:
             changed_paths="workflow_dispatch"
           else
             before="${{ github.event.before }}"
-            deploy_web=true
-            deploy_worker=true
-            any=true
             if [[ -z "${before}" || "${before}" == "0000000000000000000000000000000000000000" ]]; then
-              reason="no before SHA available"
+              deploy_web=true
+              deploy_worker=true
+              any=true
+              reason="no before SHA available; defaulting to full deploy"
               changed_paths="unknown"
             elif ! git cat-file -e "${before}^{commit}" 2>/dev/null; then
-              reason="before SHA missing locally"
+              deploy_web=true
+              deploy_worker=true
+              any=true
+              reason="before SHA missing locally; defaulting to full deploy"
               changed_paths="unknown"
             else
               mapfile -t paths < <(git diff --name-only "${before}" "${GITHUB_SHA}")
               for path in "${paths[@]}"; do
+                if [[ "${path}" == web/* ]]; then
+                  deploy_web=true
+                fi
+                if [[ "${path}" == worker/* ]]; then
+                  deploy_worker=true
+                fi
                 if [[ "${path}" =~ ^db/.+\.sql$ ]]; then
                   db_sql_changed=true
                 fi
               done
+              if [[ "${deploy_web}" == "true" || "${deploy_worker}" == "true" ]]; then
+                any=true
+              fi
               if [[ ${#paths[@]} -gt 0 ]]; then
                 changed_paths="$(printf '%s\n' "${paths[@]}" | paste -sd ',' -)"
               fi
-              reason="deploy for diff ${before}..${GITHUB_SHA}"
+              reason="deploy_web=${deploy_web} deploy_worker=${deploy_worker} for diff ${before}..${GITHUB_SHA}"
             fi
           fi
 
