@@ -12,6 +12,7 @@ import {
 } from "@/components/copilot-charts-client";
 import { query } from "@/app/lib/db";
 import { requireUser } from "@/app/lib/auth";
+import { redirectIfFeatureDisabled } from "@/app/lib/feature-flags";
 import { getParam, type SearchParams } from "@/app/lib/params";
 import { Button } from "@/components/ui/button";
 import PageHeader from "@/components/page-header";
@@ -39,6 +40,7 @@ const TIME_RANGES = [
 
 async function AgentsPage({ searchParams }: { searchParams?: Promise<SearchParams> }) {
   await requireUser();
+  await redirectIfFeatureDisabled("agents_dashboard");
 
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
 

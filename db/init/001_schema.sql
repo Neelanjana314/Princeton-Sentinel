@@ -238,6 +238,28 @@ CREATE TABLE IF NOT EXISTS copilot_response_times (
   synced_at timestamptz NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS feature_flags (
+  feature_key text PRIMARY KEY,
+  enabled boolean NOT NULL,
+  description text,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE OR REPLACE FUNCTION set_feature_flags_updated_at() RETURNS trigger AS $$
+BEGIN
+  NEW.updated_at = now();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_feature_flags_updated_at
+BEFORE UPDATE ON feature_flags
+FOR EACH ROW EXECUTE FUNCTION set_feature_flags_updated_at();
+
+INSERT INTO feature_flags (feature_key, enabled, description)
+VALUES ('agents_dashboard', true, 'Enable the dashboard agents and copilot experience.')
+ON CONFLICT (feature_key) DO NOTHING;
+
 -- Update tracking
 CREATE TABLE IF NOT EXISTS table_update_log (
   table_name text PRIMARY KEY,
@@ -284,6 +306,10 @@ FOR EACH ROW EXECUTE FUNCTION touch_table_update_log();
 
 CREATE TRIGGER trg_touch_group_memberships
 AFTER INSERT OR UPDATE OR DELETE ON msgraph_group_memberships
+FOR EACH ROW EXECUTE FUNCTION touch_table_update_log();
+
+CREATE TRIGGER trg_touch_feature_flags
+AFTER INSERT OR UPDATE OR DELETE ON feature_flags
 FOR EACH ROW EXECUTE FUNCTION touch_table_update_log();
 
 -- MV dependency metadata

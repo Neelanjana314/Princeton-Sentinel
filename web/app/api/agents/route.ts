@@ -1,12 +1,17 @@
 import { NextResponse } from "next/server";
 import { query } from "@/app/lib/db";
 import { requireUser } from "@/app/lib/auth";
+import { getFeatureDisabledApiResponse } from "@/app/lib/feature-flags";
 import { withApiRequestTiming } from "@/app/lib/request-timing";
 
 export const dynamic = "force-dynamic";
 
 const getHandler = async function GET() {
   await requireUser();
+  const disabledResponse = await getFeatureDisabledApiResponse("agents_dashboard");
+  if (disabledResponse) {
+    return disabledResponse;
+  }
 
   const [summary, errors, topics, tools] = await Promise.all([
     query(

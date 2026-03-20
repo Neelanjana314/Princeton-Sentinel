@@ -24,7 +24,7 @@ const ADMIN_PREFIXES = [
   "/api/runs",
   "/api/analytics",
 ];
-const USER_PREFIXES = ["/dashboard", "/sites", "/api/graph"];
+const USER_PREFIXES = ["/dashboard", "/sites", "/api/graph", "/api/feature-flags"];
 const LOG_PREFIX = "[PERF] [WEBAPP]";
 
 type TimingMeta = {

@@ -2,9 +2,13 @@
 
 import Link from "next/link";
 import Image from "next/image";
-import { usePathname } from "next/navigation";
+import { useEffect } from "react";
+import { usePathname, useRouter } from "next/navigation";
 
+import type { FeatureFlags } from "@/app/lib/feature-flags-config";
+import { matchesFeaturePath } from "@/app/lib/feature-flags-config";
 import UserMenu from "@/components/user-menu";
+import { FeatureFlagsProvider, useFeatureFlags } from "@/components/feature-flags-provider";
 import { cn } from "@/lib/utils";
 
 const LOGO_HEIGHT = 36;
@@ -13,11 +17,15 @@ const LOGO_WIDTH = 135;
 type AppShellProps = {
   userLabel: string;
   canAdmin: boolean;
+  initialFeatureFlags: FeatureFlags;
+  initialFeatureFlagVersion: string | null;
   children: React.ReactNode;
 };
 
-export default function AppShell({ userLabel, canAdmin, children }: AppShellProps) {
+function AppShellContent({ userLabel, canAdmin, children }: Omit<AppShellProps, "initialFeatureFlags" | "initialFeatureFlagVersion">) {
   const pathname = usePathname() ?? "/";
+  const router = useRouter();
+  const { flags } = useFeatureFlags();
   const navItems = [
     { href: "/dashboard", label: "Overview", active: pathname === "/dashboard" },
     { href: "/dashboard/sites", label: "Sites", active: pathname.startsWith("/dashboard/sites") || pathname.startsWith("/sites") },
@@ -27,7 +35,17 @@ export default function AppShell({ userLabel, canAdmin, children }: AppShellProp
     { href: "/dashboard/users", label: "Users", active: pathname.startsWith("/dashboard/users") },
     { href: "/dashboard/groups", label: "Groups", active: pathname.startsWith("/dashboard/groups") },
     { href: "/dashboard/agents", label: "Agents", active: pathname.startsWith("/dashboard/agents") || pathname.startsWith("/dashboard/copilot") },
-  ];
+  ].filter((item) => (item.href === "/dashboard/agents" ? flags.agents_dashboard : true));
+
+  useEffect(() => {
+    if (flags.agents_dashboard) {
+      return;
+    }
+    if (matchesFeaturePath("agents_dashboard", pathname)) {
+      router.replace("/dashboard");
+      router.refresh();
+    }
+  }, [flags.agents_dashboard, pathname, router]);
 
   return (
     <div className="min-h-screen bg-background">
@@ -78,5 +96,21 @@ export default function AppShell({ userLabel, canAdmin, children }: AppShellProp
       </header>
       <div className="mx-auto w-full max-w-7xl px-4 py-5 lg:px-6">{children}</div>
     </div>
+  );
+}
+
+export default function AppShell({
+  userLabel,
+  canAdmin,
+  initialFeatureFlags,
+  initialFeatureFlagVersion,
+  children,
+}: AppShellProps) {
+  return (
+    <FeatureFlagsProvider initialFlags={initialFeatureFlags} initialVersion={initialFeatureFlagVersion}>
+      <AppShellContent userLabel={userLabel} canAdmin={canAdmin}>
+        {children}
+      </AppShellContent>
+    </FeatureFlagsProvider>
   );
 }

@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { getSession, getGroupsFromSession, isAdmin, isUser } from "@/app/lib/auth";
+import { getFeatureFlagsPayload } from "@/app/lib/feature-flags";
 import AppShell from "@/components/app-shell";
 
 export const dynamic = "force-dynamic";
@@ -19,9 +20,15 @@ export default async function DashboardLayout({ children }: { children: React.Re
   }
 
   const userLabel = session.user.name ?? session.user.email ?? "Signed in";
+  const featureFlagsPayload = await getFeatureFlagsPayload();
 
   return (
-    <AppShell userLabel={userLabel} canAdmin={canAdmin}>
+    <AppShell
+      userLabel={userLabel}
+      canAdmin={canAdmin}
+      initialFeatureFlags={featureFlagsPayload.flags}
+      initialFeatureFlagVersion={featureFlagsPayload.version}
+    >
       {children}
     </AppShell>
   );
