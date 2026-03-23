@@ -10,6 +10,7 @@ from app import db
 from app.jobs.graph_ingest import run_graph_ingest
 from app.jobs.mv_refresh import run_mv_refresh
 from app.jobs.copilot_telemetry import run_copilot_telemetry
+from app.license import LicenseFeatureError, get_job_type_license_feature, require_license_feature
 from app.runtime_logger import emit
 from app.utils import log_audit_event, log_job_run_log
 
@@ -133,6 +134,30 @@ def _run_due_schedule():
                 error_reason=f"invalid_cron_expr: {exc}",
             )
             return
+
+        feature_key = get_job_type_license_feature(job_type)
+        if feature_key:
+            try:
+                require_license_feature(feature_key)
+            except LicenseFeatureError as exc:
+                cur.execute(
+                    "UPDATE job_schedules SET next_run_at = %s WHERE schedule_id = %s",
+                    [next_run_at, schedule_id],
+                )
+                conn.commit()
+                emit(
+                    "WARN",
+                    "SCHEDULER",
+                    f"Scheduled job blocked by license: job_id={job_id} job_type={job_type} feature={feature_key} error={exc}",
+                )
+                log_audit_event(
+                    action="job_run_blocked_license",
+                    entity_type="job",
+                    entity_id=str(job_id),
+                    actor=None,
+                    details={"job_type": job_type, "trigger": "schedule", "feature": feature_key, "error": str(exc)},
+                )
+                return
 
         locked = db.try_advisory_lock(cur, str(job_id))
         if not locked:
@@ -360,6 +385,24 @@ def _recover_interrupted_runs() -> int:
 def run_job_once(job, actor_claims=None):
     job_id = job["job_id"]
     job_type = job["job_type"]
+    feature_key = get_job_type_license_feature(job_type)
+    if feature_key:
+        try:
+            require_license_feature(feature_key)
+        except LicenseFeatureError as exc:
+            emit(
+                "WARN",
+                "SCHEDULER",
+                f"Run-now job blocked by license: job_id={job_id} job_type={job_type} feature={feature_key} error={exc}",
+            )
+            log_audit_event(
+                action="job_run_blocked_license",
+                entity_type="job",
+                entity_id=str(job_id),
+                actor=actor_claims,
+                details={"job_type": job_type, "trigger": "run_now", "feature": feature_key, "error": str(exc)},
+            )
+            return
     conn = db.get_conn()
     try:
         cur = conn.cursor()
@@ -449,6 +492,9 @@ def _compute_next_run(cron_expr):
 
 def _execute_job(job_type, *, run_id: str, job_id: str, actor_claims=None):
     try:
+        feature_key = get_job_type_license_feature(job_type)
+        if feature_key:
+            require_license_feature(feature_key)
         if job_type == "graph_ingest":
             log_job_run_log(run_id=run_id, level="INFO", message="graph_ingest_started", context={"job_id": job_id})
             run_graph_ingest(run_id=run_id, job_id=job_id, actor=actor_claims)

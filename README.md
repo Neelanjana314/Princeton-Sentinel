@@ -55,6 +55,7 @@ The worker + web Graph calls expect the following permissions (as provided):
 - `/analytics` -- cached dashboard summaries (materialized views)
 - `/jobs` -- job + schedule management
 - `/runs` -- job run history
+- `/license` -- active license artifact + upload (admin group only)
 - `/admin` -- worker status and run-now controls (admin group only)
 
 ## Environment variables
@@ -64,6 +65,7 @@ See `.env.example` for the full list. Key values:
 - `ENTRA_TENANT_ID`, `ENTRA_CLIENT_ID`, `ENTRA_CLIENT_SECRET`
 - `ADMIN_GROUP_ID`, `USER_GROUP_ID`
 - `DATABASE_URL`
+- `LICENSE_PUBLIC_KEY_PATH`, `LICENSE_CACHE_TTL_SECONDS`
 - `WORKER_API_URL`, `WORKER_INTERNAL_API_TOKEN`, `WORKER_HEARTBEAT_TOKEN`
 - `DB_WRITE_MAX_RETRIES`, `DB_WRITE_RETRY_BASE_MS`, `DB_WRITE_RETRY_MAX_MS`, `DB_WRITE_RETRY_JITTER_MS`
 - `GRAPH_MAX_CONCURRENCY`, `GRAPH_MAX_RETRIES`, `GRAPH_CONNECT_TIMEOUT`, `GRAPH_READ_TIMEOUT`

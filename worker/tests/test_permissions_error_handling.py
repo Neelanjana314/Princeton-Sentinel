@@ -2,13 +2,19 @@ import sys
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from app.graph_client import GraphError
-from app.jobs.graph_ingest import _build_permission_error_state, _classify_permission_sync_error
+from app.jobs.graph_ingest import (
+    _build_permission_error_state,
+    _classify_permission_sync_error,
+    _is_blocked_site_graph_error,
+    _print_drive_listing_failure,
+)
 
 
 class PermissionErrorHandlingTests(unittest.TestCase):
@@ -85,6 +91,53 @@ class PermissionErrorHandlingTests(unittest.TestCase):
         self.assertEqual(state["details"]["last_failure_signature"], "graph_not_found|404|itemNotFound")
         self.assertEqual(state["details"]["phase"], "final_retry")
         self.assertEqual(state["details"]["attempt_in_run"], 2)
+
+    @patch("builtins.print")
+    def test_print_drive_listing_failure_includes_request_url_and_target_context(self, mock_print):
+        error = GraphError(
+            423,
+            "Graph error 423: blocked",
+            "https://graph.microsoft.com/v1.0/groups/group-1/drives?$top=200",
+            '{"error":{"code":"notAllowed","message":"Access to this site has been blocked."}}',
+        )
+
+        _print_drive_listing_failure(
+            target_kind="group",
+            target_id="group-1",
+            graph_error=error,
+            extra={"group_name": "Blocked Site Group"},
+        )
+
+        mock_print.assert_called_once()
+        printed = mock_print.call_args.args[0]
+        self.assertIn('"target_kind": "group"', printed)
+        self.assertIn('"target_id": "group-1"', printed)
+        self.assertIn('"request_url": "https://graph.microsoft.com/v1.0/groups/group-1/drives?$top=200"', printed)
+        self.assertIn('"group_name": "Blocked Site Group"', printed)
+
+    def test_blocked_site_graph_error_is_detected(self):
+        error = GraphError(
+            423,
+            "Graph error 423: blocked",
+            "https://graph.microsoft.com/v1.0/users/user-1/drives?$top=200",
+            (
+                '{"error":{"code":"notAllowed","message":"Access to this site has been blocked. '
+                'Please contact the administrator to resolve this problem.",'
+                '"innerError":{"code":"resourceLocked"}}}'
+            ),
+        )
+
+        self.assertTrue(_is_blocked_site_graph_error(error))
+
+    def test_other_423_graph_error_is_not_treated_as_blocked_site(self):
+        error = GraphError(
+            423,
+            "Graph error 423: other",
+            "https://graph.microsoft.com/v1.0/users/user-1/drives?$top=200",
+            '{"error":{"code":"locked","message":"Different error","innerError":{"code":"other"}}}',
+        )
+
+        self.assertFalse(_is_blocked_site_graph_error(error))
 
 
 if __name__ == "__main__":

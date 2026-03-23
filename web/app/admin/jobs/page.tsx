@@ -1,3 +1,5 @@
+import AdminJobControlNotice from "@/app/admin/AdminJobControlNotice";
+import { getAdminJobControlState } from "@/app/admin/job-control";
 import { withPageRequestTiming } from "@/app/lib/request-timing";
 import { requireAdmin } from "@/app/lib/auth";
 import { query } from "@/app/lib/db";
@@ -7,6 +9,8 @@ import LocalDateTime from "@/components/local-date-time";
 
 async function JobsPage() {
   await requireAdmin();
+  const adminJobControl = await getAdminJobControlState();
+  const readOnly = !adminJobControl.jobControlEnabled;
 
   const rows = await query<any>(
     `
@@ -38,6 +42,8 @@ async function JobsPage() {
 
   return (
     <div className="grid gap-4">
+      <AdminJobControlNotice state={adminJobControl} />
+
       <Card>
         <CardHeader>
           <CardTitle>Jobs</CardTitle>
@@ -59,10 +65,11 @@ async function JobsPage() {
                   latestRunStatus: row.latest_run_status,
                   scheduleId: row.schedule_id,
                   scheduleEnabled: row.schedule_enabled,
+                  readOnly,
                 });
                 const hasSchedule = Boolean(row.schedule_id);
-                const showPause = hasSchedule && (status === "running" || row.schedule_enabled);
-                const showResume = hasSchedule && status !== "running" && !row.schedule_enabled;
+                const showPause = hasSchedule && (readOnly || status === "running" || row.schedule_enabled);
+                const showResume = hasSchedule && (readOnly || (status !== "running" && !row.schedule_enabled));
                 return (
                   <tr key={`${row.job_id}-${row.schedule_id || "none"}`} className="border-t">
                     <td className="py-3 font-semibold text-ink">{formatJobTypeLabel(row.job_type)}</td>
@@ -71,7 +78,7 @@ async function JobsPage() {
                     </td>
                     <td className="py-3 text-slate">{row.cron_expr || "--"}</td>
                     <td className="py-3 text-slate">
-                      <LocalDateTime value={row.schedule_enabled ? row.next_run_at : null} fallback="-" />
+                      <LocalDateTime value={readOnly ? null : row.schedule_enabled ? row.next_run_at : null} fallback="-" />
                     </td>
                     <td className="py-3">
                       <div className="flex flex-wrap gap-2">
@@ -81,16 +88,20 @@ async function JobsPage() {
                           <button
                             className="badge border-primary/35 bg-primary/15 text-foreground disabled:cursor-not-allowed disabled:opacity-70"
                             type="submit"
-                            disabled={status === "running"}
+                            disabled={readOnly || status === "running"}
                           >
-                            {status === "running" ? "Running..." : "Run Now"}
+                            {readOnly ? "Run Now" : status === "running" ? "Running..." : "Run Now"}
                           </button>
                         </form>
                         {showPause ? (
                           <form action="/api/worker/pause" method="post">
                             <input type="hidden" name="job_id" value={row.job_id} />
                             <input type="hidden" name="redirect_to" value="/admin/jobs" />
-                            <button className="badge border border-input bg-background text-foreground" type="submit">
+                            <button
+                              className="badge border border-input bg-background text-foreground disabled:cursor-not-allowed disabled:opacity-70"
+                              type="submit"
+                              disabled={readOnly}
+                            >
                               Pause Schedule
                             </button>
                           </form>
@@ -99,7 +110,11 @@ async function JobsPage() {
                           <form action="/api/worker/resume" method="post">
                             <input type="hidden" name="job_id" value={row.job_id} />
                             <input type="hidden" name="redirect_to" value="/admin/jobs" />
-                            <button className="badge bg-emerald-100 text-emerald-900" type="submit">
+                            <button
+                              className="badge bg-emerald-100 text-emerald-900 disabled:cursor-not-allowed disabled:opacity-70"
+                              type="submit"
+                              disabled={readOnly}
+                            >
                               Resume Schedule
                             </button>
                           </form>
@@ -132,8 +147,8 @@ async function JobsPage() {
               <label className="text-sm text-slate">Job</label>
               <select
                 name="job_id"
-                className="rounded-lg border border-input bg-background p-2"
-                disabled={!unscheduledJobs.length}
+                className="rounded-lg border border-input bg-background p-2 disabled:cursor-not-allowed disabled:opacity-70"
+                disabled={readOnly || !unscheduledJobs.length}
                 required
               >
                 {unscheduledJobs.map((row) => (
@@ -148,17 +163,23 @@ async function JobsPage() {
               <label className="text-sm text-slate">Cron (5-field)</label>
               <input
                 name="cron_expr"
-                className="rounded-lg border border-input bg-background p-2 font-mono text-sm"
+                className="rounded-lg border border-input bg-background p-2 font-mono text-sm disabled:cursor-not-allowed disabled:opacity-70"
                 placeholder="*/15 * * * *"
                 required
+                disabled={readOnly}
               />
               <label className="text-sm text-slate">Next run (optional ISO timestamp)</label>
               <input
                 name="next_run_at"
-                className="rounded-lg border border-input bg-background p-2 text-sm"
+                className="rounded-lg border border-input bg-background p-2 text-sm disabled:cursor-not-allowed disabled:opacity-70"
                 placeholder="2026-02-02T10:00:00Z"
+                disabled={readOnly}
               />
-              <button className="badge bg-emerald-100 text-emerald-900" type="submit" disabled={!unscheduledJobs.length}>
+              <button
+                className="badge bg-emerald-100 text-emerald-900 disabled:cursor-not-allowed disabled:opacity-70"
+                type="submit"
+                disabled={readOnly || !unscheduledJobs.length}
+              >
                 Create Schedule
               </button>
             </form>
@@ -175,8 +196,8 @@ async function JobsPage() {
               <label className="text-sm text-slate">Schedule</label>
               <select
                 name="schedule_id"
-                className="rounded-lg border border-input bg-background p-2"
-                disabled={!scheduledJobs.length}
+                className="rounded-lg border border-input bg-background p-2 disabled:cursor-not-allowed disabled:opacity-70"
+                disabled={readOnly || !scheduledJobs.length}
                 required
               >
                 {scheduledJobs.map((row) => (
@@ -190,33 +211,37 @@ async function JobsPage() {
               <label className="text-sm text-slate">Cron (5-field)</label>
               <input
                 name="cron_expr"
-                className="rounded-lg border border-input bg-background p-2 font-mono text-sm"
+                className="rounded-lg border border-input bg-background p-2 font-mono text-sm disabled:cursor-not-allowed disabled:opacity-70"
                 placeholder="*/15 * * * *"
                 required
-                disabled={!scheduledJobs.length}
+                disabled={readOnly || !scheduledJobs.length}
               />
 
               <label className="text-sm text-slate">Next run (optional ISO timestamp)</label>
               <input
                 name="next_run_at"
-                className="rounded-lg border border-input bg-background p-2 text-sm"
+                className="rounded-lg border border-input bg-background p-2 text-sm disabled:cursor-not-allowed disabled:opacity-70"
                 placeholder="2026-02-02T10:00:00Z"
-                disabled={!scheduledJobs.length}
+                disabled={readOnly || !scheduledJobs.length}
               />
 
               <label className="text-sm text-slate">Schedule Status</label>
               <select
                 name="enabled"
-                className="rounded-lg border border-input bg-background p-2"
+                className="rounded-lg border border-input bg-background p-2 disabled:cursor-not-allowed disabled:opacity-70"
                 defaultValue=""
-                disabled={!scheduledJobs.length}
+                disabled={readOnly || !scheduledJobs.length}
               >
                 <option value="">Keep Current</option>
                 <option value="true">Enabled</option>
                 <option value="false">Paused</option>
               </select>
 
-              <button className="badge border-primary/35 bg-primary/15 text-foreground" type="submit" disabled={!scheduledJobs.length}>
+              <button
+                className="badge border-primary/35 bg-primary/15 text-foreground disabled:cursor-not-allowed disabled:opacity-70"
+                type="submit"
+                disabled={readOnly || !scheduledJobs.length}
+              >
                 Save Schedule Changes
               </button>
             </form>
@@ -226,8 +251,8 @@ async function JobsPage() {
               <label className="text-sm text-slate">Delete Schedule</label>
               <select
                 name="schedule_id"
-                className="rounded-lg border border-input bg-background p-2"
-                disabled={!scheduledJobs.length}
+                className="rounded-lg border border-input bg-background p-2 disabled:cursor-not-allowed disabled:opacity-70"
+                disabled={readOnly || !scheduledJobs.length}
                 required
               >
                 {scheduledJobs.map((row) => (
@@ -236,7 +261,11 @@ async function JobsPage() {
                   </option>
                 ))}
               </select>
-              <button className="badge badge-error" type="submit" disabled={!scheduledJobs.length}>
+              <button
+                className="badge badge-error disabled:cursor-not-allowed disabled:opacity-70"
+                type="submit"
+                disabled={readOnly || !scheduledJobs.length}
+              >
                 Delete Schedule
               </button>
             </form>

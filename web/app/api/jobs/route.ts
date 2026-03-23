@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { query } from "@/app/lib/db";
 import { requireAdmin } from "@/app/lib/auth";
 import { writeAuditEvent } from "@/app/lib/audit";
+import { LicenseFeatureError, requireLicenseFeature } from "@/app/lib/license";
 import { getNonEmptyString, parseBooleanInput, parseRequestBody } from "@/app/lib/request-body";
 import { withApiRequestTiming } from "@/app/lib/request-timing";
 export const dynamic = "force-dynamic";
@@ -26,6 +27,15 @@ const postHandler = async function POST(req: Request) {
   }
   const body: any = parsed.body;
   const action = body.action || "create";
+
+  try {
+    await requireLicenseFeature("job_control");
+  } catch (err: unknown) {
+    if (err instanceof LicenseFeatureError) {
+      return NextResponse.json({ error: err.message }, { status: 403 });
+    }
+    throw err;
+  }
 
   if (action === "create") {
     return NextResponse.json({ error: "job_creation_disabled" }, { status: 403 });

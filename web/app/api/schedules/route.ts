@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { query } from "@/app/lib/db";
 import { requireAdmin } from "@/app/lib/auth";
 import { writeAuditEvent } from "@/app/lib/audit";
+import { LicenseFeatureError, requireLicenseFeature } from "@/app/lib/license";
 import { isValidCronExpression } from "@/app/lib/cron";
 import { getNonEmptyString, parseBooleanInput, parseRequestBody } from "@/app/lib/request-body";
 import { withApiRequestTiming } from "@/app/lib/request-timing";
@@ -17,6 +18,16 @@ function parseOptionalTimestamp(raw: unknown): string | null | undefined {
   const parsed = Date.parse(value);
   if (Number.isNaN(parsed)) return undefined;
   return new Date(parsed).toISOString();
+}
+
+function errorResponse(bodyType: "json" | "form" | "none", error: string, status: number) {
+  if (bodyType === "form") {
+    const url = new URL("/admin/jobs", "http://localhost");
+    url.searchParams.set("error", error.slice(0, 200));
+    url.searchParams.set("status", String(status));
+    return new NextResponse(null, { status: 303, headers: { Location: `${url.pathname}${url.search}` } });
+  }
+  return NextResponse.json({ error }, { status });
 }
 
 const getHandler = async function GET() {
@@ -39,6 +50,15 @@ const postHandler = async function POST(req: Request) {
   }
   const body: any = parsed.body;
   const action = body.action || "create";
+
+  try {
+    await requireLicenseFeature("job_control");
+  } catch (err: unknown) {
+    if (err instanceof LicenseFeatureError) {
+      return errorResponse(parsed.bodyType, err.message, 403);
+    }
+    throw err;
+  }
 
   if (action === "create") {
     const scheduleId = randomUUID();

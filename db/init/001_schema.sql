@@ -260,6 +260,31 @@ INSERT INTO feature_flags (feature_key, enabled, description)
 VALUES ('agents_dashboard', true, 'Enable the dashboard agents and copilot experience.')
 ON CONFLICT (feature_key) DO NOTHING;
 
+CREATE TABLE IF NOT EXISTS license_artifacts (
+  artifact_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  raw_license_text text NOT NULL,
+  sha256 text NOT NULL,
+  uploaded_by_oid text,
+  uploaded_by_upn text,
+  uploaded_by_name text,
+  uploaded_at timestamptz NOT NULL DEFAULT now(),
+  verification_status text NOT NULL,
+  verification_error text
+);
+
+CREATE TABLE IF NOT EXISTS active_license_artifact (
+  slot text PRIMARY KEY,
+  artifact_id uuid REFERENCES license_artifacts(artifact_id),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CHECK (slot = 'default')
+);
+
+CREATE OR REPLACE FUNCTION reject_license_artifact_mutation() RETURNS trigger AS $$
+BEGIN
+  RAISE EXCEPTION 'license_artifacts are immutable';
+END;
+$$ LANGUAGE plpgsql;
+
 -- Update tracking
 CREATE TABLE IF NOT EXISTS table_update_log (
   table_name text PRIMARY KEY,
@@ -311,6 +336,22 @@ FOR EACH ROW EXECUTE FUNCTION touch_table_update_log();
 CREATE TRIGGER trg_touch_feature_flags
 AFTER INSERT OR UPDATE OR DELETE ON feature_flags
 FOR EACH ROW EXECUTE FUNCTION touch_table_update_log();
+
+CREATE TRIGGER trg_touch_license_artifacts
+AFTER INSERT OR UPDATE OR DELETE ON license_artifacts
+FOR EACH ROW EXECUTE FUNCTION touch_table_update_log();
+
+CREATE TRIGGER trg_touch_active_license_artifact
+AFTER INSERT OR UPDATE OR DELETE ON active_license_artifact
+FOR EACH ROW EXECUTE FUNCTION touch_table_update_log();
+
+CREATE TRIGGER trg_reject_license_artifact_update
+BEFORE UPDATE ON license_artifacts
+FOR EACH ROW EXECUTE FUNCTION reject_license_artifact_mutation();
+
+CREATE TRIGGER trg_reject_license_artifact_delete
+BEFORE DELETE ON license_artifacts
+FOR EACH ROW EXECUTE FUNCTION reject_license_artifact_mutation();
 
 -- MV dependency metadata
 CREATE TABLE IF NOT EXISTS mv_dependencies (

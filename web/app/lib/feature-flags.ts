@@ -8,6 +8,7 @@ import {
   isFeatureEnabled,
   mergeFeatureFlags,
 } from "./feature-flags-config";
+import { getCurrentLicenseSummary } from "./license";
 
 export {
   FEATURE_FLAG_DEFAULTS,
@@ -53,7 +54,12 @@ export async function getFeatureFlags(): Promise<FeatureFlags> {
     `
   );
 
-  return mergeFeatureFlags(rows);
+  const flags = mergeFeatureFlags(rows);
+  const license = await getCurrentLicenseSummary();
+  return {
+    ...flags,
+    agents_dashboard: flags.agents_dashboard && license.features.agents_dashboard,
+  };
 }
 
 export async function getFeatureFlagVersion(): Promise<string | null> {

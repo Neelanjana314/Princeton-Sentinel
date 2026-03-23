@@ -12,11 +12,25 @@ import {
   mergeFeatureFlags,
   setFeatureFlagsQueryForTests,
 } from "../app/lib/feature-flags";
+import { LICENSE_FEATURE_DEFAULTS, setLicenseSummaryForTests } from "../app/lib/license";
 
 type MockQueryResult = any[];
 
 function setMockQuery(responses: MockQueryResult[]) {
   let index = 0;
+
+  setLicenseSummaryForTests({
+    status: "active",
+    mode: "full",
+    verificationStatus: "verified",
+    verificationError: null,
+    artifactId: "artifact-1",
+    sha256: "hash",
+    uploadedAt: "2026-03-23T12:00:00.000Z",
+    uploadedBy: { oid: null, upn: null, name: null },
+    payload: null,
+    features: { ...LICENSE_FEATURE_DEFAULTS, agents_dashboard: true },
+  });
 
   setFeatureFlagsQueryForTests(async () => {
     const response = responses[index];
@@ -30,6 +44,7 @@ function setMockQuery(responses: MockQueryResult[]) {
 
 function clearMockQuery() {
   setFeatureFlagsQueryForTests(null);
+  setLicenseSummaryForTests(null);
 }
 
 test("mergeFeatureFlags applies defaults when rows are missing", () => {
@@ -95,4 +110,25 @@ test("matchesFeaturePath recognizes all agents feature routes", () => {
   assert.equal(matchesFeaturePath("agents_dashboard", "/api/agents"), true);
   assert.equal(matchesFeaturePath("agents_dashboard", "/api/copilot"), true);
   assert.equal(matchesFeaturePath("agents_dashboard", "/dashboard/sites"), false);
+});
+
+test("getFeatureFlags disables agents dashboard when the license disables it", async () => {
+  setMockQuery([[{ feature_key: "agents_dashboard", enabled: true }]]);
+  setLicenseSummaryForTests({
+    status: "active",
+    mode: "full",
+    verificationStatus: "verified",
+    verificationError: null,
+    artifactId: "artifact-2",
+    sha256: "hash-2",
+    uploadedAt: "2026-03-23T12:00:00.000Z",
+    uploadedBy: { oid: null, upn: null, name: null },
+    payload: null,
+    features: { ...LICENSE_FEATURE_DEFAULTS, agents_dashboard: false },
+  });
+
+  const flags = await getFeatureFlags();
+  assert.equal(flags.agents_dashboard, false);
+
+  clearMockQuery();
 });

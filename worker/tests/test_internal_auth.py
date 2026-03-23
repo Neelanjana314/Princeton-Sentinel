@@ -44,6 +44,20 @@ class WorkerInternalAuthTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json(), {"jobs": []})
 
+    @patch("app.api.get_current_license", side_effect=RuntimeError("license_db_down"))
+    @patch("app.api.db.fetch_one", side_effect=RuntimeError("db_down"))
+    def test_health_returns_degraded_response_when_license_lookup_fails(self, _fetch_one, _get_current_license):
+        response = self.client.get("/health", headers={"X-Worker-Internal-Token": "worker-secret-token"})
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertFalse(payload["ok"])
+        self.assertFalse(payload["db"])
+        self.assertEqual(payload["license"]["status"], "invalid")
+        self.assertEqual(payload["license"]["mode"], "read_only")
+        self.assertEqual(payload["license"]["verification_status"], "invalid")
+        self.assertEqual(payload["license"]["verification_error"], "license_db_down")
+
 
 if __name__ == "__main__":
     unittest.main()

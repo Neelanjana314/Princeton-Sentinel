@@ -4,6 +4,7 @@ type StatusInput = {
   latestRunStatus?: string | null;
   scheduleId?: string | null;
   scheduleEnabled?: boolean | null;
+  readOnly?: boolean;
 };
 
 const statusMeta: Record<DerivedJobStatus, { label: string; className: string }> = {
@@ -14,6 +15,9 @@ const statusMeta: Record<DerivedJobStatus, { label: string; className: string }>
 };
 
 export function deriveJobStatus(input: StatusInput): DerivedJobStatus {
+  if (input.readOnly) {
+    return input.scheduleId ? "paused" : "no_schedule";
+  }
   if ((input.latestRunStatus || "").toLowerCase() === "running") {
     return "running";
   }

@@ -2,6 +2,13 @@ import AzureADProvider from "next-auth/providers/azure-ad";
 import type { NextAuthOptions } from "next-auth";
 import { getServerSession } from "next-auth/next";
 
+type RequireAuthResult = {
+  session: any;
+  groups: string[];
+};
+
+let requireAdminOverride: (() => Promise<RequireAuthResult>) | null = null;
+
 function getAuthEnv() {
   const tenantId = process.env.ENTRA_TENANT_ID;
   const clientId = process.env.ENTRA_CLIENT_ID;
@@ -125,10 +132,17 @@ export async function requireUser() {
 }
 
 export async function requireAdmin() {
+  if (requireAdminOverride) {
+    return requireAdminOverride();
+  }
   const session = await getSession();
   const groups = getGroupsFromSession(session);
   if (!session || !isAdmin(groups)) {
     throw new Error("forbidden");
   }
   return { session, groups };
+}
+
+export function setRequireAdminForTests(override: (() => Promise<RequireAuthResult>) | null) {
+  requireAdminOverride = override;
 }

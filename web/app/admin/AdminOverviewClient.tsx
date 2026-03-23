@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 
+import AdminJobControlNotice from "@/app/admin/AdminJobControlNotice";
+import type { AdminJobControlState } from "@/app/admin/job-control";
 import LocalDateTime from "@/components/local-date-time";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -38,15 +40,18 @@ type WorkerJob = {
 type OverviewResponse = {
   health?: WorkerHealth;
   jobs?: WorkerJob[];
+  adminJobControl?: AdminJobControlState;
 };
 
 const REFRESH_INTERVAL_MS = 5000;
 
-export default function AdminOverviewClient() {
+export default function AdminOverviewClient({ initialAdminJobControl }: { initialAdminJobControl: AdminJobControlState }) {
   const [health, setHealth] = useState<WorkerHealth | null>(null);
   const [jobs, setJobs] = useState<WorkerJob[]>([]);
+  const [adminJobControl, setAdminJobControl] = useState<AdminJobControlState>(initialAdminJobControl);
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<string | null>(null);
+  const readOnly = !adminJobControl.jobControlEnabled;
 
   const runningCount = useMemo(
     () =>
@@ -56,9 +61,10 @@ export default function AdminOverviewClient() {
             latestRunStatus: job.latest_run_status || job.status,
             scheduleId: job.schedule_id,
             scheduleEnabled: job.schedule_enabled,
+            readOnly,
           }) === "running"
       ).length,
-    [jobs]
+    [jobs, readOnly]
   );
   const dbHealthLabel = health ? (health.db ? "Connected" : "Down") : "--";
   const workerHealthLabel = health ? (health.ok ? "Healthy" : "Degraded") : "--";
@@ -86,6 +92,7 @@ export default function AdminOverviewClient() {
         if (cancelled) return;
         setHealth(payload.health || null);
         setJobs(Array.isArray(payload.jobs) ? payload.jobs : []);
+        setAdminJobControl(payload.adminJobControl || initialAdminJobControl);
         setLastUpdatedAt(new Date().toLocaleString());
         setRefreshError(null);
       } catch (err: any) {
@@ -104,6 +111,8 @@ export default function AdminOverviewClient() {
 
   return (
     <div className="grid gap-4">
+      <AdminJobControlNotice state={adminJobControl} />
+
       <div className="mt-1 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
         <div>
           <span className="font-semibold text-foreground">Live</span>: refreshes every 5s
@@ -180,11 +189,11 @@ export default function AdminOverviewClient() {
                   latestRunStatus: row.latest_run_status || row.status,
                   scheduleId: row.schedule_id,
                   scheduleEnabled: row.schedule_enabled,
+                  readOnly,
                 });
                 const hasSchedule = Boolean(row.schedule_id);
-                const showPauseResume = hasSchedule && status !== "running";
-                const showPause = showPauseResume && Boolean(row.schedule_enabled);
-                const showResume = showPauseResume && !row.schedule_enabled;
+                const showPause = hasSchedule && (readOnly || Boolean(row.schedule_enabled));
+                const showResume = hasSchedule && (readOnly || !row.schedule_enabled);
                 return (
                   <tr key={`${row.job_id}-${row.schedule_id || "none"}`} className="border-t border-white/60">
                     <td className="py-3 font-semibold text-ink">{formatJobTypeLabel(row.job_type)}</td>
@@ -193,7 +202,7 @@ export default function AdminOverviewClient() {
                     </td>
                     <td className="py-3 text-slate">{row.cron_expr || "--"}</td>
                     <td className="py-3 text-slate">
-                      <LocalDateTime value={row.schedule_enabled ? row.next_run_at : null} fallback="-" />
+                      <LocalDateTime value={readOnly ? null : row.schedule_enabled ? row.next_run_at : null} fallback="-" />
                     </td>
                     <td className="py-3">
                       <div className="flex flex-wrap gap-2">
@@ -203,16 +212,20 @@ export default function AdminOverviewClient() {
                           <button
                             className="badge border-primary/35 bg-primary/15 text-foreground disabled:cursor-not-allowed disabled:opacity-70"
                             type="submit"
-                            disabled={status === "running"}
+                            disabled={readOnly || status === "running"}
                           >
-                            {status === "running" ? "Running..." : "Run Now"}
+                            {readOnly ? "Run Now" : status === "running" ? "Running..." : "Run Now"}
                           </button>
                         </form>
                         {showPause ? (
                           <form action="/api/worker/pause" method="post">
                             <input type="hidden" name="job_id" value={row.job_id} />
                             <input type="hidden" name="redirect_to" value="/admin" />
-                            <button className="badge border border-input bg-background text-foreground" type="submit">
+                            <button
+                              className="badge border border-input bg-background text-foreground disabled:cursor-not-allowed disabled:opacity-70"
+                              type="submit"
+                              disabled={readOnly}
+                            >
                               Pause Schedule
                             </button>
                           </form>
@@ -221,7 +234,11 @@ export default function AdminOverviewClient() {
                           <form action="/api/worker/resume" method="post">
                             <input type="hidden" name="job_id" value={row.job_id} />
                             <input type="hidden" name="redirect_to" value="/admin" />
-                            <button className="badge bg-emerald-100 text-emerald-900" type="submit">
+                            <button
+                              className="badge bg-emerald-100 text-emerald-900 disabled:cursor-not-allowed disabled:opacity-70"
+                              type="submit"
+                              disabled={readOnly}
+                            >
                               Resume Schedule
                             </button>
                           </form>

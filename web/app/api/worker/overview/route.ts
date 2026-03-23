@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { getAdminJobControlState } from "@/app/admin/job-control";
 import { requireAdmin } from "@/app/lib/auth";
 import { withApiRequestTiming } from "@/app/lib/request-timing";
 import { callWorker, isWorkerTimeoutError, parseWorkerErrorText } from "@/app/lib/worker-api";
@@ -50,9 +51,10 @@ async function safeWorkerFetch(path: string): Promise<SafeWorkerFetchResult> {
 
 const getHandler = async function GET() {
   await requireAdmin();
-  const [healthRes, jobsRes] = await Promise.all([
+  const [healthRes, jobsRes, adminJobControl] = await Promise.all([
     safeWorkerFetch("/health"),
     safeWorkerFetch("/jobs/status"),
+    getAdminJobControlState(),
   ]);
 
   const healthPayload = healthRes.ok ? healthRes.payload || {} : null;
@@ -67,6 +69,7 @@ const getHandler = async function GET() {
         jobs_error: jobsRes.ok ? null : jobsRes.error || `HTTP ${jobsRes.status || 502}`,
         health: healthPayload || {},
         jobs,
+        adminJobControl,
       },
       { status: Math.max(healthRes.status || 502, jobsRes.status || 502) }
     );
@@ -75,6 +78,7 @@ const getHandler = async function GET() {
   return NextResponse.json({
     health: healthPayload || {},
     jobs,
+    adminJobControl,
   });
 };
 

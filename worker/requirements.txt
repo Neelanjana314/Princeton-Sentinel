@@ -5,3 +5,4 @@ requests==2.32.4
 msal==1.28.1
 croniter==2.0.5
 PyJWT==2.12.1
+cryptography==44.0.1

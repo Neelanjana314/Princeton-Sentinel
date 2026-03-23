@@ -62,14 +62,24 @@ export default function UserMenu({ userLabel, canAdmin }: UserMenuProps) {
           className="absolute right-0 z-50 mt-2 w-44 rounded-md border bg-card p-1 text-sm shadow-md"
         >
           {canAdmin ? (
-            <Link
-              href="/admin"
-              role="menuitem"
-              className="block rounded px-3 py-2 text-muted-foreground hover:bg-accent hover:text-foreground"
-              onClick={() => setOpen(false)}
-            >
-              Admin
-            </Link>
+            <>
+              <Link
+                href="/license"
+                role="menuitem"
+                className="block rounded px-3 py-2 text-muted-foreground hover:bg-accent hover:text-foreground"
+                onClick={() => setOpen(false)}
+              >
+                License
+              </Link>
+              <Link
+                href="/admin"
+                role="menuitem"
+                className="block rounded px-3 py-2 text-muted-foreground hover:bg-accent hover:text-foreground"
+                onClick={() => setOpen(false)}
+              >
+                Admin
+              </Link>
+            </>
           ) : null}
           <button
             type="button"

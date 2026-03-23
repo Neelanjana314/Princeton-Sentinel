@@ -15,7 +15,7 @@ The web app does **not** run ingestion jobs directly. It orchestrates intent (ru
 
 ## Runtime and Build
 
-- Framework: Next.js `16.1.6`
+- Framework: Next.js `16.1.7`
 - React: `18.2.0`
 - Auth: `next-auth` + Azure AD provider
 - DB driver: `pg`

@@ -2,6 +2,10 @@ import { fetchWithTimeout, getPositiveIntEnv, HttpTimeoutError } from "@/app/lib
 
 const WORKER_INTERNAL_TOKEN_HEADER = "x-worker-internal-token";
 const DEFAULT_WORKER_TIMEOUT_MS = getPositiveIntEnv("WORKER_API_TIMEOUT_MS", 10000);
+type CallWorkerResult = { res: Response; text: string };
+type CallWorkerOverride = (path: string, init?: RequestInit) => Promise<CallWorkerResult>;
+
+let callWorkerOverride: CallWorkerOverride | null = null;
 
 export class WorkerApiError extends Error {
   status: number;
@@ -42,7 +46,10 @@ export function isWorkerTimeoutError(err: unknown): boolean {
   return err instanceof HttpTimeoutError;
 }
 
-export async function callWorker(path: string, init: RequestInit = {}): Promise<{ res: Response; text: string }> {
+export async function callWorker(path: string, init: RequestInit = {}): Promise<CallWorkerResult> {
+  if (callWorkerOverride) {
+    return callWorkerOverride(path, init);
+  }
   const url = buildWorkerUrl(path);
   const token = getInternalToken();
 
@@ -52,6 +59,10 @@ export async function callWorker(path: string, init: RequestInit = {}): Promise<
   const res = await fetchWithTimeout(url, { ...init, headers, cache: "no-store" }, DEFAULT_WORKER_TIMEOUT_MS);
   const text = await res.text();
   return { res, text };
+}
+
+export function setCallWorkerForTests(override: CallWorkerOverride | null) {
+  callWorkerOverride = override;
 }
 
 export function parseWorkerErrorText(rawText: string): string {

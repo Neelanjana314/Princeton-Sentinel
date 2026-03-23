@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireAdmin } from "@/app/lib/auth";
+import { LicenseFeatureError, requireLicenseFeature } from "@/app/lib/license";
 import { callWorker, isWorkerTimeoutError, parseWorkerErrorText } from "@/app/lib/worker-api";
 import { getNonEmptyString, parseRequestBody } from "@/app/lib/request-body";
 import { withApiRequestTiming } from "@/app/lib/request-timing";
@@ -40,6 +41,15 @@ const postHandler = async function POST(req: Request) {
   const jobId = getNonEmptyString(body.job_id);
   if (!jobId) {
     return errorResponse(parsed.bodyType, target, "job_id_required", 400);
+  }
+
+  try {
+    await requireLicenseFeature("job_control");
+  } catch (err: unknown) {
+    if (err instanceof LicenseFeatureError) {
+      return errorResponse(parsed.bodyType, target, err.message, 403);
+    }
+    throw err;
   }
 
   try {

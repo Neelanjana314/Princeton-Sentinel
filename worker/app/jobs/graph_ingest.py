@@ -1032,6 +1032,58 @@ def _is_personal_site(site_row: Dict[str, Any]) -> bool:
     return hostname.endswith("my.sharepoint.com") or "/personal/" in web_url
 
 
+def _parse_graph_error_response(graph_error: GraphError) -> Dict[str, Any]:
+    if not graph_error.response_text:
+        return {}
+    try:
+        payload = json.loads(graph_error.response_text)
+    except (TypeError, ValueError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _is_blocked_site_graph_error(graph_error: GraphError) -> bool:
+    if graph_error.status_code != 423:
+        return False
+
+    payload = _parse_graph_error_response(graph_error)
+    error_obj = payload.get("error") if isinstance(payload, dict) else None
+    if not isinstance(error_obj, dict):
+        return False
+
+    error_code = str(error_obj.get("code") or "").strip()
+    message = str(error_obj.get("message") or "").strip().lower()
+    inner_error = error_obj.get("innerError") if isinstance(error_obj.get("innerError"), dict) else {}
+    inner_code = str(inner_error.get("code") or "").strip()
+
+    return (
+        error_code == "notAllowed"
+        and inner_code == "resourceLocked"
+        and "access to this site has been blocked" in message
+    )
+
+
+def _print_drive_listing_failure(
+    *,
+    target_kind: str,
+    target_id: str,
+    graph_error: GraphError,
+    extra: Optional[Dict[str, Any]] = None,
+):
+    details: Dict[str, Any] = {
+        "stage": "drives",
+        "target_kind": target_kind,
+        "target_id": target_id,
+        "status_code": graph_error.status_code,
+        "request_url": graph_error.url,
+        "error": graph_error.message,
+        "response_text": _truncate_text(graph_error.response_text, max_len=2000),
+    }
+    if extra:
+        details.update({k: v for k, v in extra.items() if v is not None})
+    print(f"[graph_ingest] drive listing failure {json.dumps(details, sort_keys=True)}", flush=True)
+
+
 def _drive_row(
     drive: Dict[str, Any],
     *,
@@ -1206,6 +1258,15 @@ def _ingest_drives(client: GraphClient, *, run_id: str, flush_every: int) -> Dic
                         dropped_duplicates += dropped
                         batch = []
             except GraphError as exc:
+                _print_drive_listing_failure(
+                    target_kind="site",
+                    target_id=site_id,
+                    graph_error=exc,
+                    extra={
+                        "site_web_url": site.get("web_url"),
+                        "site_hostname": site.get("hostname"),
+                    },
+                )
                 if exc.status_code not in (403, 404, 410):
                     site_skipped_error += 1
                 emit("WARN", "GRAPH", f"Site drives skipped: site_id={site_id} status_code={exc.status_code} error={exc}")
@@ -1242,6 +1303,11 @@ def _ingest_drives(client: GraphClient, *, run_id: str, flush_every: int) -> Dic
                 if not has_drive:
                     group_no_drive += 1
             except GraphError as exc:
+                _print_drive_listing_failure(
+                    target_kind="group",
+                    target_id=group_id,
+                    graph_error=exc,
+                )
                 if exc.status_code in (403, 404, 410):
                     group_no_drive += 1
                     emit("WARN", "GRAPH", f"Group has no accessible drives: group_id={group_id} status_code={exc.status_code}")
@@ -1281,9 +1347,31 @@ def _ingest_drives(client: GraphClient, *, run_id: str, flush_every: int) -> Dic
                 if not has_drive:
                     user_no_drive += 1
             except GraphError as exc:
-                if exc.status_code in (403, 404, 410):
+                _print_drive_listing_failure(
+                    target_kind="user",
+                    target_id=user_id,
+                    graph_error=exc,
+                )
+                is_blocked_site = _is_blocked_site_graph_error(exc)
+                if exc.status_code in (403, 404, 410) or is_blocked_site:
                     user_no_drive += 1
-                    emit("WARN", "GRAPH", f"User has no accessible drives: user_id={user_id} status_code={exc.status_code}")
+                    reason = "blocked_site" if is_blocked_site else "no_accessible_drives"
+                    emit(
+                        "WARN",
+                        "GRAPH",
+                        f"User has no accessible drives: user_id={user_id} status_code={exc.status_code} reason={reason}",
+                    )
+                    log_job_run_log(
+                        run_id=run_id,
+                        level="WARN",
+                        message="user_drives_skipped",
+                        context={
+                            "user_id": user_id,
+                            "status_code": exc.status_code,
+                            "reason": reason,
+                            "error": str(exc),
+                        },
+                    )
                     continue
                 emit("ERROR", "GRAPH", f"User drive listing failed: user_id={user_id} status_code={exc.status_code} error={exc}")
                 raise

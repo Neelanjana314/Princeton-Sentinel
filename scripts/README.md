@@ -28,3 +28,17 @@ Install dependency example:
 ```bash
 python3 -m pip install psycopg2-binary
 ```
+
+## `generate-license.mjs`
+
+Generate a signed license artifact into `.local/licenses/` using a local private key that is not committed to VCS.
+
+### Usage
+
+```bash
+node scripts/generate-license.mjs \
+  --license-type enterprise \
+  --tenant-id 00000000-0000-0000-0000-000000000000 \
+  --expires-at 2026-12-31T23:59:59Z \
+  --preset enterprise
+```

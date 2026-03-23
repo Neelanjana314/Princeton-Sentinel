@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireAdmin, requireUser } from "@/app/lib/auth";
+import { LicenseFeatureError, requireLicenseFeature } from "@/app/lib/license";
 import { graphDelete, graphGet } from "@/app/lib/graph";
 import { withTransaction } from "@/app/lib/db";
 import { writeAuditEvent } from "@/app/lib/audit";
@@ -113,6 +114,24 @@ const deleteHandler = async function DELETE(req: Request) {
   const normalizedItemId = String(itemId);
   const normalizedPermissionId = String(permissionId);
   const encodedPermissionId = encodeURIComponent(normalizedPermissionId);
+
+  try {
+    await requireLicenseFeature("permission_revoke");
+  } catch (err: unknown) {
+    if (err instanceof LicenseFeatureError) {
+      await safeWriteRevokeLog({
+        actor,
+        driveId: normalizedDriveId,
+        itemId: normalizedItemId,
+        permissionId: normalizedPermissionId,
+        outcome: "failed",
+        failureReason: err.message,
+        details: { stage: "license_gate" },
+      });
+      return NextResponse.json({ error: err.message }, { status: 403 });
+    }
+    throw err;
+  }
 
   let permission: any = null;
   try {
