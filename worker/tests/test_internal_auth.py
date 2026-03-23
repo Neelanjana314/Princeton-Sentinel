@@ -39,10 +39,53 @@ class WorkerInternalAuthTests(unittest.TestCase):
                 self.assertEqual(response.status_code, 401)
 
     @patch("app.api.db.fetch_all", return_value=[])
-    def test_jobs_status_accepts_valid_internal_token(self, _fetch_all):
+    @patch("app.api.get_current_license")
+    def test_jobs_status_accepts_valid_internal_token(self, mock_get_current_license, _fetch_all):
+        mock_get_current_license.return_value = {
+            "status": "active",
+            "mode": "full",
+            "verification_status": "verified",
+            "verification_error": None,
+            "artifact_id": "artifact-123",
+            "sha256": "abc123",
+            "uploaded_at": None,
+            "uploaded_by": {"oid": None, "upn": None, "name": None},
+            "payload": None,
+            "features": {},
+        }
         response = self.client.get("/jobs/status", headers={"X-Worker-Internal-Token": "worker-secret-token"})
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.get_json(), {"jobs": []})
+        self.assertEqual(
+            response.get_json(),
+            {
+                "jobs": [],
+                "license": {
+                    "status": "active",
+                    "mode": "full",
+                    "verification_status": "verified",
+                    "verification_error": None,
+                    "artifact_id": "artifact-123",
+                    "sha256": "abc123",
+                    "uploaded_at": None,
+                    "uploaded_by": {"oid": None, "upn": None, "name": None},
+                    "payload": None,
+                    "features": {},
+                },
+            },
+        )
+
+    @patch("app.api.db.fetch_all", return_value=[])
+    @patch("app.api.get_current_license", side_effect=RuntimeError("license_db_down"))
+    def test_jobs_status_returns_degraded_license_when_lookup_fails(self, _get_current_license, _fetch_all):
+        response = self.client.get("/jobs/status", headers={"X-Worker-Internal-Token": "worker-secret-token"})
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertEqual(payload["jobs"], [])
+        self.assertEqual(payload["license"]["status"], "invalid")
+        self.assertEqual(payload["license"]["mode"], "read_only")
+        self.assertEqual(payload["license"]["verification_status"], "invalid")
+        self.assertEqual(payload["license"]["verification_error"], "license_db_down")
 
     @patch("app.api.get_current_license", side_effect=RuntimeError("license_db_down"))
     @patch("app.api.db.fetch_one", side_effect=RuntimeError("db_down"))

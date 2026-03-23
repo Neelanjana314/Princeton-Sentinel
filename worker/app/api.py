@@ -57,6 +57,17 @@ def _response_error_summary(response) -> str:
     return body
 
 
+def _safe_license_summary(context: str):
+    try:
+        return get_current_license()
+    except Exception as exc:
+        text = str(exc).replace("\n", " ").replace("\r", " ").strip() or "license_lookup_failed"
+        if len(text) > 220:
+            text = text[:217] + "..."
+        emit("ERROR", "FLASK_API", f"{context} license lookup failed: error={text}")
+        return get_license_lookup_failure_summary(text)
+
+
 def create_app():
     app = Flask(__name__)
 
@@ -104,14 +115,7 @@ def create_app():
         except Exception:
             db_ok = False
         heartbeat = get_heartbeat_status()
-        try:
-            license_summary = get_current_license()
-        except Exception as exc:
-            text = str(exc).replace("\n", " ").replace("\r", " ").strip() or "license_lookup_failed"
-            if len(text) > 220:
-                text = text[:217] + "..."
-            emit("ERROR", "FLASK_API", f"Health check license lookup failed: error={text}")
-            license_summary = get_license_lookup_failure_summary(text)
+        license_summary = _safe_license_summary("Health check")
         return jsonify(
             {
                 "ok": db_ok and is_heartbeat_healthy(),
@@ -142,7 +146,7 @@ def create_app():
             ORDER BY j.job_type
             """
         )
-        return jsonify({"jobs": rows, "license": get_current_license()})
+        return jsonify({"jobs": rows, "license": _safe_license_summary("Jobs status")})
 
     @app.post("/jobs/run-now")
     @require_internal_token
