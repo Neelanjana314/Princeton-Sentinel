@@ -15,7 +15,7 @@ permissions:
   contents: read
 
 env:
-  STAGING_VERSION: 3.2.5
+  STAGING_VERSION: 3.2.6
   AZ_RESOURCE_GROUP: ${{ vars.AZ_RESOURCE_GROUP }}
   AZ_ACR_NAME: ${{ vars.AZ_ACR_NAME }}
   AZ_WEB_APP_NAME: ${{ vars.AZ_WEB_APP_NAME }}
@@ -33,7 +33,7 @@ jobs:
       changed_paths: ${{ steps.changes.outputs.changed_paths }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -130,7 +130,7 @@ jobs:
     environment: staging
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -144,9 +144,9 @@ jobs:
 
       - name: Setup Node.js
         if: needs.detect_changes.outputs.deploy_web == 'true'
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
-          node-version: "20"
+          node-version: "24"
           cache: "npm"
           cache-dependency-path: web/package-lock.json
 
@@ -169,7 +169,7 @@ jobs:
 
       - name: Setup Python
         if: needs.detect_changes.outputs.deploy_worker == 'true'
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
