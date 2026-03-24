@@ -14,6 +14,11 @@ CREATE TABLE IF NOT EXISTS msgraph_users (
   usage_location text,
   created_dt timestamptz,
   synced_at timestamptz,
+  is_available boolean NOT NULL DEFAULT true,
+  last_available_at timestamptz,
+  availability_checked_at timestamptz,
+  availability_reason text,
+  availability_error jsonb,
   deleted_at timestamptz,
   raw_json jsonb
 );
@@ -41,6 +46,11 @@ CREATE TABLE IF NOT EXISTS msgraph_sites (
   site_collection_id text,
   created_dt timestamptz,
   synced_at timestamptz,
+  is_available boolean NOT NULL DEFAULT true,
+  last_available_at timestamptz,
+  availability_checked_at timestamptz,
+  availability_reason text,
+  availability_error jsonb,
   deleted_at timestamptz,
   raw_json jsonb
 );
@@ -75,6 +85,11 @@ CREATE TABLE IF NOT EXISTS msgraph_drives (
   quota_state text,
   created_dt timestamptz,
   synced_at timestamptz,
+  is_available boolean NOT NULL DEFAULT true,
+  last_available_at timestamptz,
+  availability_checked_at timestamptz,
+  availability_reason text,
+  availability_error jsonb,
   deleted_at timestamptz,
   raw_json jsonb
 );

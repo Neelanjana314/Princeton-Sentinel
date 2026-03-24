@@ -6,6 +6,7 @@ import * as React from "react";
 import { SortableTable } from "@/components/sortable-table";
 import { Badge } from "@/components/ui/badge";
 import { formatBytes, formatIsoDate, formatIsoDateTime } from "@/app/lib/format";
+import { describeAvailabilityReason } from "@/app/lib/site-availability";
 
 type SiteRow = {
   site_key: string;
@@ -15,6 +16,9 @@ type SiteRow = {
   web_url: string | null;
   created_dt: string | null;
   is_personal: boolean | null;
+  is_available: boolean | null;
+  last_available_at: string | null;
+  availability_reason: string | null;
   template: string | null;
   storage_used_bytes: number | null;
   storage_total_bytes: number | null;
@@ -51,6 +55,9 @@ export function SitesTable({ items }: { items: SiteRow[] }) {
             ) : (
               <span className="truncate text-xs text-muted-foreground">{s.route_drive_id}</span>
             )}
+            {s.is_available === false ? (
+              <span className="truncate text-xs text-amber-700">{describeAvailabilityReason(s.availability_reason)}</span>
+            ) : null}
           </div>
         ),
         cellClassName: "max-w-[420px]",
@@ -64,6 +71,23 @@ export function SitesTable({ items }: { items: SiteRow[] }) {
           if (s.is_personal) return <Badge>Personal</Badge>;
           return <Badge variant="outline">SharePoint</Badge>;
         },
+      },
+      {
+        id: "availability",
+        header: "Availability",
+        sortValue: (s: SiteRow) => (s.is_available === false ? "unavailable" : "available"),
+        cell: (s: SiteRow) =>
+          s.is_available === false ? (
+            <Badge className="border-amber-500/30 bg-amber-500/10 text-amber-900">Unavailable</Badge>
+          ) : (
+            <Badge variant="outline">Available</Badge>
+          ),
+      },
+      {
+        id: "lastAvailable",
+        header: "Last available",
+        sortValue: (s: SiteRow) => parseIsoToTs(s.last_available_at),
+        cell: (s: SiteRow) => <span className="text-muted-foreground">{formatIsoDateTime(s.last_available_at)}</span>,
       },
       {
         id: "template",

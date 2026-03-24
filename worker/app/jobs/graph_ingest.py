@@ -139,6 +139,14 @@ def _execute_values_dedup_merge_drives(
     return len(deduped), dropped
 
 
+def _flush_drive_batch(cur, conn, upsert_sql: str, batch: list[tuple]) -> tuple[int, int]:
+    if not batch:
+        return 0, 0
+    executed, dropped = _execute_values_dedup_merge_drives(cur, upsert_sql, batch)
+    conn.commit()
+    return executed, dropped
+
+
 def _execute_db_mutation_with_retry(
     conn,
     *,
@@ -194,6 +202,128 @@ def _execute_db_mutation_with_retry(
                 f"DB mutation retry: operation={op_name} attempt={retries}/{max_retries} sqlstate={sqlstate} sleep_ms={int(round(sleep_seconds * 1000))}",
             )
             time.sleep(sleep_seconds)
+
+
+_AVAILABILITY_TABLES = {"msgraph_users", "msgraph_sites", "msgraph_drives"}
+
+
+def _graph_error_code(graph_error: GraphError) -> Optional[str]:
+    payload = _parse_graph_error_response(graph_error)
+    error_obj = payload.get("error") if isinstance(payload, dict) else None
+    if not isinstance(error_obj, dict):
+        return None
+    code = str(error_obj.get("code") or "").strip()
+    return code or None
+
+
+def _availability_reason_from_graph_error(graph_error: GraphError, *, fallback: str = "graph_error") -> str:
+    if _is_blocked_site_graph_error(graph_error):
+        return "blocked_site"
+    if graph_error.status_code == 403:
+        return "graph_forbidden"
+    if graph_error.status_code == 404:
+        return "graph_not_found"
+    if graph_error.status_code == 410:
+        return "graph_gone"
+    code = (_graph_error_code(graph_error) or "").strip()
+    if code:
+        normalized = []
+        for char in code:
+            normalized.append(char.lower() if char.isalnum() else "_")
+        reason = "".join(normalized).strip("_")
+        if reason:
+            return reason
+    return fallback
+
+
+def _availability_error_payload(
+    graph_error: GraphError,
+    *,
+    target_kind: str,
+    target_id: str,
+    reason: str,
+) -> Dict[str, Any]:
+    return {
+        "target_kind": target_kind,
+        "target_id": target_id,
+        "reason": reason,
+        "status_code": graph_error.status_code,
+        "graph_code": _graph_error_code(graph_error),
+        "request_url": _truncate_text(graph_error.url, max_len=500),
+        "message": _truncate_text(graph_error.message, max_len=500),
+        "response_excerpt": _truncate_text(graph_error.response_text, max_len=1000),
+    }
+
+
+def _mark_entity_available(cur, *, table: str, entity_id: str, checked_at: datetime):
+    if table not in _AVAILABILITY_TABLES:
+        raise ValueError(f"Unsupported availability table: {table}")
+    cur.execute(
+        f"""
+        UPDATE {table}
+        SET is_available = TRUE,
+            last_available_at = %s,
+            availability_checked_at = %s,
+            availability_reason = NULL,
+            availability_error = NULL
+        WHERE id = %s
+          AND deleted_at IS NULL
+        """,
+        [checked_at, checked_at, entity_id],
+    )
+
+
+def _mark_entity_unavailable(
+    cur,
+    *,
+    table: str,
+    entity_id: str,
+    checked_at: datetime,
+    reason: str,
+    error_payload: Optional[Dict[str, Any]],
+):
+    if table not in _AVAILABILITY_TABLES:
+        raise ValueError(f"Unsupported availability table: {table}")
+    cur.execute(
+        f"""
+        UPDATE {table}
+        SET is_available = FALSE,
+            availability_checked_at = %s,
+            availability_reason = %s,
+            availability_error = %s
+        WHERE id = %s
+          AND deleted_at IS NULL
+        """,
+        [checked_at, reason, db.jsonb(error_payload) if error_payload is not None else None, entity_id],
+    )
+
+
+def _mark_drives_unavailable(
+    cur,
+    *,
+    checked_at: datetime,
+    reason: str,
+    error_payload: Optional[Dict[str, Any]],
+    where_sql: str,
+    where_params: list[Any],
+):
+    cur.execute(
+        f"""
+        UPDATE msgraph_drives
+        SET is_available = FALSE,
+            availability_checked_at = %s,
+            availability_reason = %s,
+            availability_error = %s
+        WHERE deleted_at IS NULL
+          AND {where_sql}
+        """,
+        [checked_at, reason, db.jsonb(error_payload) if error_payload is not None else None, *where_params],
+    )
+    return cur.rowcount
+
+
+def _is_terminal_drive_listing_error(graph_error: GraphError) -> bool:
+    return graph_error.status_code in (403, 404, 410) or _is_blocked_site_graph_error(graph_error)
 
 
 def _load_user_maps(cur) -> tuple[dict[str, str], dict[str, str]]:
@@ -487,7 +617,9 @@ def _ingest_users(client: GraphClient, *, run_id: str, flush_every: int) -> Dict
     upsert_sql = """
         INSERT INTO msgraph_users
           (id, display_name, user_principal_name, mail, account_enabled, user_type, job_title,
-           department, office_location, usage_location, created_dt, synced_at, deleted_at, raw_json)
+           department, office_location, usage_location, created_dt, synced_at, is_available,
+           last_available_at, availability_checked_at, availability_reason, availability_error,
+           deleted_at, raw_json)
         VALUES %s
         ON CONFLICT (id) DO UPDATE SET
           display_name = EXCLUDED.display_name,
@@ -501,6 +633,11 @@ def _ingest_users(client: GraphClient, *, run_id: str, flush_every: int) -> Dict
           usage_location = EXCLUDED.usage_location,
           created_dt = EXCLUDED.created_dt,
           synced_at = EXCLUDED.synced_at,
+          is_available = EXCLUDED.is_available,
+          last_available_at = EXCLUDED.last_available_at,
+          availability_checked_at = EXCLUDED.availability_checked_at,
+          availability_reason = EXCLUDED.availability_reason,
+          availability_error = EXCLUDED.availability_error,
           deleted_at = NULL,
           raw_json = EXCLUDED.raw_json
     """
@@ -531,6 +668,11 @@ def _ingest_users(client: GraphClient, *, run_id: str, flush_every: int) -> Dict
                     user.get("usageLocation"),
                     user.get("createdDateTime"),
                     synced_at,
+                    True,
+                    synced_at,
+                    synced_at,
+                    None,
+                    None,
                     None,
                     db.jsonb(user),
                 )
@@ -552,10 +694,15 @@ def _ingest_users(client: GraphClient, *, run_id: str, flush_every: int) -> Dict
         cur.execute(
             """
             UPDATE msgraph_users
-            SET deleted_at = %s, synced_at = %s
+            SET deleted_at = %s,
+                synced_at = %s,
+                is_available = FALSE,
+                availability_checked_at = %s,
+                availability_reason = 'deleted',
+                availability_error = '{}'::jsonb
             WHERE synced_at < %s AND deleted_at IS NULL
             """,
-            [synced_at, synced_at, synced_at],
+            [synced_at, synced_at, synced_at, synced_at],
         )
         marked_deleted = cur.rowcount
         conn.commit()
@@ -843,7 +990,9 @@ def _ingest_sites(client: GraphClient, *, run_id: str, flush_every: int) -> Dict
 
     upsert_active_sql = """
         INSERT INTO msgraph_sites
-          (id, name, web_url, hostname, site_collection_id, created_dt, synced_at, deleted_at, raw_json)
+          (id, name, web_url, hostname, site_collection_id, created_dt, synced_at, is_available,
+           last_available_at, availability_checked_at, availability_reason, availability_error,
+           deleted_at, raw_json)
         VALUES %s
         ON CONFLICT (id) DO UPDATE SET
           name = EXCLUDED.name,
@@ -852,16 +1001,25 @@ def _ingest_sites(client: GraphClient, *, run_id: str, flush_every: int) -> Dict
           site_collection_id = EXCLUDED.site_collection_id,
           created_dt = EXCLUDED.created_dt,
           synced_at = EXCLUDED.synced_at,
+          is_available = EXCLUDED.is_available,
+          last_available_at = EXCLUDED.last_available_at,
+          availability_checked_at = EXCLUDED.availability_checked_at,
+          availability_reason = EXCLUDED.availability_reason,
+          availability_error = EXCLUDED.availability_error,
           deleted_at = NULL,
           raw_json = EXCLUDED.raw_json
     """
 
     upsert_removed_sql = """
         INSERT INTO msgraph_sites
-          (id, synced_at, deleted_at, raw_json)
+          (id, synced_at, is_available, availability_checked_at, availability_reason, availability_error, deleted_at, raw_json)
         VALUES %s
         ON CONFLICT (id) DO UPDATE SET
           synced_at = EXCLUDED.synced_at,
+          is_available = EXCLUDED.is_available,
+          availability_checked_at = EXCLUDED.availability_checked_at,
+          availability_reason = EXCLUDED.availability_reason,
+          availability_error = EXCLUDED.availability_error,
           deleted_at = EXCLUDED.deleted_at,
           raw_json = EXCLUDED.raw_json
     """
@@ -894,7 +1052,7 @@ def _ingest_sites(client: GraphClient, *, run_id: str, flush_every: int) -> Dict
                     total += 1
                     if "@removed" in site:
                         removed += 1
-                        removed_batch.append((site_id, synced_at, synced_at, db.jsonb(site)))
+                        removed_batch.append((site_id, synced_at, False, synced_at, "deleted", db.jsonb({}), synced_at, db.jsonb(site)))
                     else:
                         site_id, name, web_url, hostname, site_collection_id, created_dt = _normalize_site(site)
                         active_batch.append(
@@ -906,6 +1064,11 @@ def _ingest_sites(client: GraphClient, *, run_id: str, flush_every: int) -> Dict
                                 site_collection_id,
                                 created_dt,
                                 synced_at,
+                                True,
+                                synced_at,
+                                synced_at,
+                                None,
+                                None,
                                 None,
                                 db.jsonb(site),
                             )
@@ -959,6 +1122,11 @@ def _ingest_sites(client: GraphClient, *, run_id: str, flush_every: int) -> Dict
                         site_collection_id,
                         created_dt,
                         synced_at,
+                        True,
+                        synced_at,
+                        synced_at,
+                        None,
+                        None,
                         None,
                         db.jsonb(site),
                     )
@@ -1143,6 +1311,11 @@ def _drive_row(
         quota.get("state"),
         drive.get("createdDateTime"),
         synced_at,
+        True,
+        synced_at,
+        synced_at,
+        None,
+        None,
         None,
         db.jsonb(drive),
     )
@@ -1172,7 +1345,8 @@ def _ingest_drives(client: GraphClient, *, run_id: str, flush_every: int) -> Dic
            created_by_display_name, created_by_email, created_by_graph_id, last_modified_by_user_id,
            last_modified_by_type, last_modified_by_display_name, last_modified_by_email,
            last_modified_by_graph_id, last_modified_dt, quota_total, quota_used, quota_remaining,
-           quota_deleted, quota_state, created_dt, synced_at, deleted_at, raw_json)
+           quota_deleted, quota_state, created_dt, synced_at, is_available, last_available_at,
+           availability_checked_at, availability_reason, availability_error, deleted_at, raw_json)
         VALUES %s
         ON CONFLICT (id) DO UPDATE SET
           site_id = EXCLUDED.site_id,
@@ -1203,6 +1377,11 @@ def _ingest_drives(client: GraphClient, *, run_id: str, flush_every: int) -> Dic
           quota_state = EXCLUDED.quota_state,
           created_dt = EXCLUDED.created_dt,
           synced_at = EXCLUDED.synced_at,
+          is_available = EXCLUDED.is_available,
+          last_available_at = EXCLUDED.last_available_at,
+          availability_checked_at = EXCLUDED.availability_checked_at,
+          availability_reason = EXCLUDED.availability_reason,
+          availability_error = EXCLUDED.availability_error,
           deleted_at = NULL,
           raw_json = EXCLUDED.raw_json
     """
@@ -1236,11 +1415,12 @@ def _ingest_drives(client: GraphClient, *, run_id: str, flush_every: int) -> Dic
             if _is_personal_site(site):
                 site_skipped_personal += 1
                 continue
+            site_batch: list[tuple] = []
             try:
                 for drive in client.iter_paged(f"/sites/{site_id}/drives?$top={GRAPH_PAGE_SIZE}&$select={select}"):
                     if not drive.get("id"):
                         continue
-                    batch.append(
+                    site_batch.append(
                         _drive_row(
                             drive,
                             site_id=site_id,
@@ -1251,12 +1431,14 @@ def _ingest_drives(client: GraphClient, *, run_id: str, flush_every: int) -> Dic
                             users_by_email=users_by_email,
                         )
                     )
-                    if len(batch) >= flush_every:
-                        executed, dropped = _execute_values_dedup_merge_drives(cur, upsert_sql, batch)
-                        conn.commit()
-                        drive_upserts += executed
-                        dropped_duplicates += dropped
-                        batch = []
+                batch.extend(site_batch)
+                if len(batch) >= flush_every:
+                    executed, dropped = _flush_drive_batch(cur, conn, upsert_sql, batch)
+                    drive_upserts += executed
+                    dropped_duplicates += dropped
+                    batch = []
+                _mark_entity_available(cur, table="msgraph_sites", entity_id=site_id, checked_at=synced_at)
+                conn.commit()
             except GraphError as exc:
                 _print_drive_listing_failure(
                     target_kind="site",
@@ -1267,8 +1449,32 @@ def _ingest_drives(client: GraphClient, *, run_id: str, flush_every: int) -> Dic
                         "site_hostname": site.get("hostname"),
                     },
                 )
-                if exc.status_code not in (403, 404, 410):
+                if not _is_terminal_drive_listing_error(exc):
                     site_skipped_error += 1
+                else:
+                    reason = _availability_reason_from_graph_error(exc, fallback="site_drives_unavailable")
+                    error_payload = _availability_error_payload(
+                        exc,
+                        target_kind="site",
+                        target_id=site_id,
+                        reason=reason,
+                    )
+                    _mark_entity_unavailable(
+                        cur,
+                        table="msgraph_sites",
+                        entity_id=site_id,
+                        checked_at=synced_at,
+                        reason=reason,
+                        error_payload=error_payload,
+                    )
+                    _mark_drives_unavailable(
+                        cur,
+                        checked_at=synced_at,
+                        reason=reason,
+                        error_payload=error_payload,
+                        where_sql="site_id = %s",
+                        where_params=[site_id],
+                    )
                 emit("WARN", "GRAPH", f"Site drives skipped: site_id={site_id} status_code={exc.status_code} error={exc}")
                 log_job_run_log(
                     run_id=run_id,
@@ -1276,20 +1482,24 @@ def _ingest_drives(client: GraphClient, *, run_id: str, flush_every: int) -> Dic
                     message="site_drives_skipped",
                     context={"site_id": site_id, "status_code": exc.status_code, "error": str(exc)},
                 )
-                conn.rollback()
+                if _is_terminal_drive_listing_error(exc):
+                    conn.commit()
+                else:
+                    conn.rollback()
 
         cur.execute("SELECT id FROM msgraph_groups WHERE deleted_at IS NULL")
         group_ids = [row[0] for row in cur.fetchall()]
         conn.commit()
         for group_id in group_ids:
             group_count += 1
+            group_batch: list[tuple] = []
             try:
                 has_drive = False
                 for drive in client.iter_paged(f"/groups/{group_id}/drives?$top={GRAPH_PAGE_SIZE}&$select={select}"):
                     if not drive.get("id"):
                         continue
                     has_drive = True
-                    batch.append(
+                    group_batch.append(
                         _drive_row(
                             drive,
                             site_id=None,
@@ -1302,13 +1512,30 @@ def _ingest_drives(client: GraphClient, *, run_id: str, flush_every: int) -> Dic
                     )
                 if not has_drive:
                     group_no_drive += 1
+                batch.extend(group_batch)
             except GraphError as exc:
                 _print_drive_listing_failure(
                     target_kind="group",
                     target_id=group_id,
                     graph_error=exc,
                 )
-                if exc.status_code in (403, 404, 410):
+                if _is_terminal_drive_listing_error(exc):
+                    reason = _availability_reason_from_graph_error(exc, fallback="group_drives_unavailable")
+                    error_payload = _availability_error_payload(
+                        exc,
+                        target_kind="group",
+                        target_id=group_id,
+                        reason=reason,
+                    )
+                    _mark_drives_unavailable(
+                        cur,
+                        checked_at=synced_at,
+                        reason=reason,
+                        error_payload=error_payload,
+                        where_sql="site_id IS NULL AND owner_id = %s",
+                        where_params=[group_id],
+                    )
+                    conn.commit()
                     group_no_drive += 1
                     emit("WARN", "GRAPH", f"Group has no accessible drives: group_id={group_id} status_code={exc.status_code}")
                     continue
@@ -1316,8 +1543,7 @@ def _ingest_drives(client: GraphClient, *, run_id: str, flush_every: int) -> Dic
                 raise
 
             if len(batch) >= flush_every:
-                executed, dropped = _execute_values_dedup_merge_drives(cur, upsert_sql, batch)
-                conn.commit()
+                executed, dropped = _flush_drive_batch(cur, conn, upsert_sql, batch)
                 drive_upserts += executed
                 dropped_duplicates += dropped
                 batch = []
@@ -1327,13 +1553,14 @@ def _ingest_drives(client: GraphClient, *, run_id: str, flush_every: int) -> Dic
         conn.commit()
         for user_id in user_ids:
             user_count += 1
+            user_batch: list[tuple] = []
             try:
                 has_drive = False
                 for drive in client.iter_paged(f"/users/{user_id}/drives?$top={GRAPH_PAGE_SIZE}&$select={select}"):
                     if not drive.get("id"):
                         continue
                     has_drive = True
-                    batch.append(
+                    user_batch.append(
                         _drive_row(
                             drive,
                             site_id=None,
@@ -1346,6 +1573,7 @@ def _ingest_drives(client: GraphClient, *, run_id: str, flush_every: int) -> Dic
                     )
                 if not has_drive:
                     user_no_drive += 1
+                batch.extend(user_batch)
             except GraphError as exc:
                 _print_drive_listing_failure(
                     target_kind="user",
@@ -1355,7 +1583,22 @@ def _ingest_drives(client: GraphClient, *, run_id: str, flush_every: int) -> Dic
                 is_blocked_site = _is_blocked_site_graph_error(exc)
                 if exc.status_code in (403, 404, 410) or is_blocked_site:
                     user_no_drive += 1
-                    reason = "blocked_site" if is_blocked_site else "no_accessible_drives"
+                    reason = "blocked_site" if is_blocked_site else _availability_reason_from_graph_error(exc, fallback="no_accessible_drives")
+                    error_payload = _availability_error_payload(
+                        exc,
+                        target_kind="user",
+                        target_id=user_id,
+                        reason=reason,
+                    )
+                    _mark_drives_unavailable(
+                        cur,
+                        checked_at=synced_at,
+                        reason=reason,
+                        error_payload=error_payload,
+                        where_sql="site_id IS NULL AND owner_id = %s",
+                        where_params=[user_id],
+                    )
+                    conn.commit()
                     emit(
                         "WARN",
                         "GRAPH",
@@ -1377,15 +1620,13 @@ def _ingest_drives(client: GraphClient, *, run_id: str, flush_every: int) -> Dic
                 raise
 
             if len(batch) >= flush_every:
-                executed, dropped = _execute_values_dedup_merge_drives(cur, upsert_sql, batch)
-                conn.commit()
+                executed, dropped = _flush_drive_batch(cur, conn, upsert_sql, batch)
                 drive_upserts += executed
                 dropped_duplicates += dropped
                 batch = []
 
         if batch:
-            executed, dropped = _execute_values_dedup_merge_drives(cur, upsert_sql, batch)
-            conn.commit()
+            executed, dropped = _flush_drive_batch(cur, conn, upsert_sql, batch)
             drive_upserts += executed
             dropped_duplicates += dropped
 
@@ -1547,7 +1788,7 @@ def _ingest_drive_items(client: GraphClient, *, run_id: str, flush_every: int) -
     conn = db.get_conn()
     try:
         cur = conn.cursor()
-        cur.execute("SELECT id FROM msgraph_drives WHERE deleted_at IS NULL")
+        cur.execute("SELECT id FROM msgraph_drives WHERE deleted_at IS NULL AND is_available = TRUE")
         drive_ids = [row[0] for row in cur.fetchall()]
         conn.commit()
         users_by_id, users_by_email = _load_user_maps(cur)
@@ -1780,6 +2021,23 @@ def _ingest_drive_items(client: GraphClient, *, run_id: str, flush_every: int) -
                         continue
 
                     drive_skipped_error += 1
+                    if _is_terminal_drive_listing_error(exc):
+                        reason = _availability_reason_from_graph_error(exc, fallback="drive_items_unavailable")
+                        error_payload = _availability_error_payload(
+                            exc,
+                            target_kind="drive",
+                            target_id=drive_id,
+                            reason=reason,
+                        )
+                        _mark_entity_unavailable(
+                            cur,
+                            table="msgraph_drives",
+                            entity_id=drive_id,
+                            checked_at=synced_at,
+                            reason=reason,
+                            error_payload=error_payload,
+                        )
+                        conn.commit()
                     emit(
                         "WARN",
                         "GRAPH",
@@ -1791,7 +2049,8 @@ def _ingest_drive_items(client: GraphClient, *, run_id: str, flush_every: int) -
                         message="drive_items_skipped",
                         context={"drive_id": drive_id, "status_code": exc.status_code, "error": str(exc)},
                     )
-                    conn.rollback()
+                    if not _is_terminal_drive_listing_error(exc):
+                        conn.rollback()
                     break
 
         log_job_run_log(
@@ -2365,26 +2624,29 @@ def _scan_permissions(client: GraphClient, config: Dict[str, Any], *, run_id: st
         while True:
             cur.execute(
                 """
-                SELECT drive_id, id
-                FROM msgraph_drive_items
-                WHERE deleted_at IS NULL
-                  AND is_folder = false
+                SELECT i.drive_id, i.id
+                FROM msgraph_drive_items i
+                JOIN msgraph_drives d ON d.id = i.drive_id
+                WHERE i.deleted_at IS NULL
+                  AND i.is_folder = false
+                  AND d.deleted_at IS NULL
+                  AND d.is_available = TRUE
                   AND (
-                    permissions_last_synced_at IS NULL
-                    OR permissions_last_synced_at < %s
+                    i.permissions_last_synced_at IS NULL
+                    OR i.permissions_last_synced_at < %s
                     OR (
-                      permissions_last_error_at IS NOT NULL
-                      AND (permissions_last_synced_at IS NULL OR permissions_last_synced_at < %s)
+                      i.permissions_last_error_at IS NOT NULL
+                      AND (i.permissions_last_synced_at IS NULL OR i.permissions_last_synced_at < %s)
                     )
                     OR (
-                      modified_dt IS NOT NULL
-                      AND modified_dt >= %s
-                      AND (permissions_last_synced_at IS NULL OR permissions_last_synced_at < %s)
+                      i.modified_dt IS NOT NULL
+                      AND i.modified_dt >= %s
+                      AND (i.permissions_last_synced_at IS NULL OR i.permissions_last_synced_at < %s)
                     )
                   )
                 ORDER BY
-                  CASE WHEN permissions_last_error_at IS NOT NULL THEN 0 ELSE 1 END,
-                  permissions_last_synced_at NULLS FIRST
+                  CASE WHEN i.permissions_last_error_at IS NOT NULL THEN 0 ELSE 1 END,
+                  i.permissions_last_synced_at NULLS FIRST
                 LIMIT %s
                 """,
                 [cutoff, synced_at, cutoff, synced_at, candidate_limit],

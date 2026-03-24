@@ -40,6 +40,8 @@ async function SitesPage({ searchParams }: { searchParams?: Promise<SearchParams
   const sortMap: Record<string, string> = {
     title: "title",
     type: "is_personal",
+    availability: "is_available",
+    lastAvailable: "last_available_at",
     template: "template",
     created: "created_dt",
     storage: "storage_used_bytes",
@@ -95,8 +97,8 @@ async function SitesPage({ searchParams }: { searchParams?: Promise<SearchParams
         ),
     query<any>(
       `
-      SELECT site_key, site_id, route_drive_id, title, web_url, created_dt, is_personal, template,
-             storage_used_bytes, storage_total_bytes, last_activity_dt
+      SELECT site_key, site_id, route_drive_id, title, web_url, created_dt, is_personal, is_available,
+             last_available_at, availability_reason, template, storage_used_bytes, storage_total_bytes, last_activity_dt
       FROM mv_msgraph_routable_site_drives
       WHERE ${CACHE_LIBRARY_FILTER}
       ${clause ? `AND ${clause.replace(/^WHERE\s+/i, "")}` : ""}

@@ -11,6 +11,7 @@ import { getParam, getWindowDays, SearchParams } from "@/app/lib/params";
 import { getInternalDomainPatterns } from "@/app/lib/internalDomains";
 
 import { SiteActivityTrendTable, SiteTopUsersTable } from "./site-detail-tables";
+import { SiteAvailabilityNotice } from "./site-availability-notice";
 
 export const dynamic = "force-dynamic";
 
@@ -50,6 +51,9 @@ async function DriveDetailPage({
       d.drive_type,
       d.web_url AS drive_web_url,
       d.created_dt,
+      d.is_available,
+      d.last_available_at,
+      d.availability_reason,
       d.quota_used AS storage_used_bytes,
       d.quota_total AS storage_total_bytes,
       d.owner_display_name,
@@ -278,6 +282,12 @@ async function DriveDetailPage({
           </form>
         </div>
       </div>
+
+      <SiteAvailabilityNotice
+        isAvailable={drive.is_available}
+        lastAvailableAt={drive.last_available_at}
+        availabilityReason={drive.availability_reason}
+      />
 
       <div className="grid gap-3 md:grid-cols-3">
         <Card>

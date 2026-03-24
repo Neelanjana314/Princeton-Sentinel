@@ -13,6 +13,7 @@ import {
   SiteMostSharedItemsTable,
   SiteSharingLinkBreakdownTable,
 } from "./site-sharing-tables";
+import { SiteAvailabilityNotice } from "../site-availability-notice";
 
 export const dynamic = "force-dynamic";
 
@@ -24,7 +25,17 @@ async function DriveSharingPage({ params }: { params: Promise<{ driveId: string 
 
   const driveRows = await query<any>(
     `
-    SELECT d.id, d.site_id, d.name, d.owner_display_name, d.owner_email, u.display_name AS owner_user_name, s.name AS site_name
+    SELECT
+      d.id,
+      d.site_id,
+      d.name,
+      d.is_available,
+      d.last_available_at,
+      d.availability_reason,
+      d.owner_display_name,
+      d.owner_email,
+      u.display_name AS owner_user_name,
+      s.name AS site_name
     FROM msgraph_drives d
     LEFT JOIN msgraph_users u ON u.id = d.owner_id AND u.deleted_at IS NULL
     LEFT JOIN msgraph_sites s ON s.id = d.site_id AND s.deleted_at IS NULL
@@ -130,6 +141,12 @@ async function DriveSharingPage({ params }: { params: Promise<{ driveId: string 
           </Link>
         </div>
       </div>
+
+      <SiteAvailabilityNotice
+        isAvailable={drive.is_available}
+        lastAvailableAt={drive.last_available_at}
+        availabilityReason={drive.availability_reason}
+      />
 
       <Card>
         <CardHeader>
