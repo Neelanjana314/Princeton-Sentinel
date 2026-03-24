@@ -42,3 +42,4 @@ Thumbs.db
 web/tsconfig.tsbuildinfo
 .agents/skills/async-python-patterns/SKILL.md
 docker-compose.override.yml
+.venv-compat/
