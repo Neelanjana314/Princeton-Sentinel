@@ -298,6 +298,13 @@ sharepoint_rows AS (
     COALESCE(s.web_url, rdm.route_drive_web_url) AS web_url,
     COALESCE(s.created_dt, rdm.route_drive_created_dt) AS created_dt,
     false AS is_personal,
+    CASE
+      WHEN s.id IS NULL THEN false
+      WHEN COALESCE((s.raw_json->>'isPersonalSite') = 'true', false) THEN false
+      WHEN LOWER(COALESCE(s.hostname, '')) LIKE '%my.sharepoint.com' THEN false
+      WHEN LOWER(COALESCE(s.web_url, '')) LIKE '%/personal/%' THEN false
+      ELSE true
+    END AS is_dashboard_sharepoint,
     COALESCE(s.is_available, rdm.route_drive_is_available, true) AS is_available,
     COALESCE(s.last_available_at, rdm.route_drive_last_available_at) AS last_available_at,
     COALESCE(s.availability_reason, rdm.route_drive_availability_reason) AS availability_reason,
@@ -337,6 +344,7 @@ personal_rows AS (
     d.web_url,
     d.created_dt,
     true AS is_personal,
+    false AS is_dashboard_sharepoint,
     d.is_available,
     d.last_available_at,
     d.availability_reason,

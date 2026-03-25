@@ -30,7 +30,7 @@ function labelDriveType(driveType: string | null | undefined) {
     case "business":
       return "User Drives";
     case "documentLibrary":
-      return "Group/Sharepoint Drives";
+      return "Group/SharePoint Drives";
     case "cacheLibrary":
       return "Cache Library";
     default:
@@ -101,7 +101,7 @@ async function DashboardPage() {
       />
 
       <MetricGrid>
-        <MetricCard label="Sharepoint Sites" value={chartTotals.sites.toLocaleString()} />
+        <MetricCard label="SharePoint Sites" value={chartTotals.sites.toLocaleString()} />
         <MetricCard label="Active Users" value={chartTotals.users.toLocaleString()} />
         <MetricCard label="Groups" value={chartTotals.groups.toLocaleString()} />
         <MetricCard label="Drives" value={chartTotals.drives.toLocaleString()} />
@@ -111,7 +111,7 @@ async function DashboardPage() {
         <Card>
           <CardHeader>
             <CardTitle>Directory totals</CardTitle>
-            <CardDescription>Sharepoint sites, active users, groups, drives</CardDescription>
+            <CardDescription>SharePoint sites, active users, groups, drives</CardDescription>
           </CardHeader>
           <CardContent className="h-72">
             <DashboardTotalsBarChartClient totals={chartTotals} />

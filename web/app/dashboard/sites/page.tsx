@@ -12,8 +12,8 @@ import { SitesSummaryGraph } from "@/components/sites-summary-graph";
 import PageHeader from "@/components/page-header";
 import FilterBar from "@/components/filter-bar";
 
-const CACHE_LIBRARY_FILTER = `
-  LOWER(COALESCE(web_url, '')) NOT LIKE '%cachelibrary%'
+const DASHBOARD_SHAREPOINT_FILTER = `
+  is_dashboard_sharepoint = true
 `;
 
 function buildSearchFilter(search: string | null) {
@@ -39,22 +39,18 @@ async function SitesPage({ searchParams }: { searchParams?: Promise<SearchParams
 
   const sortMap: Record<string, string> = {
     title: "title",
-    type: "is_personal",
-    availability: "is_available",
-    lastAvailable: "last_available_at",
-    template: "template",
     created: "created_dt",
     storage: "storage_used_bytes",
     lastActivity: "last_activity_dt",
   };
   const sortColumn = sortMap[sort] || "last_activity_dt";
   const { clause, params } = buildSearchFilter(search);
-  const [countRows, summaryRows, createdSeries, rows] = await Promise.all([
+  const [countRows, summaryRows, createdSeries, recencyRows, rows] = await Promise.all([
     query<any>(
       `
       SELECT COUNT(*)::int AS total
       FROM mv_msgraph_routable_site_drives
-      WHERE ${CACHE_LIBRARY_FILTER}
+      WHERE ${DASHBOARD_SHAREPOINT_FILTER}
       ${clause ? `AND ${clause.replace(/^WHERE\s+/i, "")}` : ""}
       `,
       params
@@ -64,43 +60,52 @@ async function SitesPage({ searchParams }: { searchParams?: Promise<SearchParams
       SELECT
         COUNT(*)::int AS total,
         COUNT(*) FILTER (WHERE created_dt >= now() - interval '30 days')::int AS new_30,
-        COUNT(*) FILTER (WHERE created_dt >= now() - interval '90 days')::int AS new_90,
-        COUNT(*) FILTER (WHERE is_personal = true)::int AS personal_count,
-        COUNT(*) FILTER (WHERE is_personal = false)::int AS sharepoint_count
+        COUNT(*) FILTER (WHERE created_dt >= now() - interval '90 days')::int AS new_90
       FROM mv_msgraph_routable_site_drives
-      WHERE ${CACHE_LIBRARY_FILTER}
+      WHERE ${DASHBOARD_SHAREPOINT_FILTER}
       ${clause ? `AND ${clause.replace(/^WHERE\s+/i, "")}` : ""}
       `,
       params
     ),
-    search
-      ? query<any>(
-          `
-          SELECT date_trunc('month', created_dt) AS month, COUNT(*)::int AS count
-          FROM mv_msgraph_routable_site_drives
-          WHERE created_dt IS NOT NULL
-            AND ${CACHE_LIBRARY_FILTER}
-            ${clause ? `AND ${clause.replace(/^WHERE\s+/i, "")}` : ""}
-          GROUP BY date_trunc('month', created_dt)
-          ORDER BY month DESC
-          LIMIT 12
-          `,
-          params
-        )
-      : query<any>(
-          `
-          SELECT month, (personal_count + sharepoint_count)::int AS count
-          FROM mv_msgraph_sites_created_month
-          ORDER BY month DESC
-          LIMIT 12
-          `
-        ),
     query<any>(
       `
-      SELECT site_key, site_id, route_drive_id, title, web_url, created_dt, is_personal, is_available,
-             last_available_at, availability_reason, template, storage_used_bytes, storage_total_bytes, last_activity_dt
+      SELECT date_trunc('month', created_dt) AS month, COUNT(*)::int AS count
       FROM mv_msgraph_routable_site_drives
-      WHERE ${CACHE_LIBRARY_FILTER}
+      WHERE created_dt IS NOT NULL
+        AND ${DASHBOARD_SHAREPOINT_FILTER}
+        ${clause ? `AND ${clause.replace(/^WHERE\s+/i, "")}` : ""}
+      GROUP BY date_trunc('month', created_dt)
+      ORDER BY month DESC
+      LIMIT 12
+      `,
+      params
+    ),
+    query<any>(
+      `
+      SELECT
+        COUNT(*) FILTER (WHERE last_activity_dt >= now() - interval '30 days')::int AS active_30,
+        COUNT(*) FILTER (
+          WHERE last_activity_dt < now() - interval '30 days'
+            AND last_activity_dt >= now() - interval '90 days'
+        )::int AS active_31_90,
+        COUNT(*) FILTER (
+          WHERE last_activity_dt < now() - interval '90 days'
+            AND last_activity_dt >= now() - interval '180 days'
+        )::int AS active_91_180,
+        COUNT(*) FILTER (WHERE last_activity_dt < now() - interval '180 days')::int AS active_180_plus,
+        COUNT(*) FILTER (WHERE last_activity_dt IS NULL)::int AS no_activity
+      FROM mv_msgraph_routable_site_drives
+      WHERE ${DASHBOARD_SHAREPOINT_FILTER}
+      ${clause ? `AND ${clause.replace(/^WHERE\s+/i, "")}` : ""}
+      `,
+      params
+    ),
+    query<any>(
+      `
+      SELECT site_key, site_id, route_drive_id, title, web_url, created_dt,
+             storage_used_bytes, storage_total_bytes, last_activity_dt
+      FROM mv_msgraph_routable_site_drives
+      WHERE ${DASHBOARD_SHAREPOINT_FILTER}
       ${clause ? `AND ${clause.replace(/^WHERE\s+/i, "")}` : ""}
       ORDER BY ${sortColumn} ${dir.toUpperCase()} NULLS LAST
       LIMIT $${params.length + 1} OFFSET $${params.length + 2}
@@ -111,18 +116,15 @@ async function SitesPage({ searchParams }: { searchParams?: Promise<SearchParams
   const total = countRows[0]?.total || 0;
 
   const summary = summaryRows[0] || {};
-  const typeBreakdown = [
-    { label: "SharePoint", value: Number(summary.sharepoint_count || 0) },
-    { label: "Personal", value: Number(summary.personal_count || 0) },
-  ].filter((p) => p.value > 0);
+  const recency = recencyRows[0] || {};
 
   return (
     <main className="ps-page">
-      <PageHeader title="Sites" subtitle="Discovery and inventory across SharePoint and personal sites." />
+      <PageHeader title="SharePoint Sites" subtitle="Inventory for the same SharePoint site population shown on the dashboard overview." />
 
       <form action="/dashboard/sites" method="get">
         <FilterBar>
-          <Input name="q" placeholder="Search title, URL, id…" defaultValue={search || ""} className="w-72" />
+          <Input name="q" placeholder="Search title, URL, or id…" defaultValue={search || ""} className="w-72" />
           <Input
             name="pageSize"
             type="number"
@@ -142,7 +144,7 @@ async function SitesPage({ searchParams }: { searchParams?: Promise<SearchParams
         <Card className="text-center">
           <CardHeader>
             <CardTitle className="text-3xl font-bold">{formatNumber(total)}</CardTitle>
-            <CardDescription>Total Sites</CardDescription>
+            <CardDescription>Total SharePoint Sites</CardDescription>
           </CardHeader>
         </Card>
         <Card className="text-center">
@@ -160,18 +162,24 @@ async function SitesPage({ searchParams }: { searchParams?: Promise<SearchParams
       </div>
 
       <SitesSummaryGraph
-        typeBreakdown={typeBreakdown}
         createdByMonth={createdSeries.map((p: any) => ({
           label: p.month ? new Date(p.month).toLocaleDateString(undefined, { month: "short", year: "2-digit" }) : "--",
           value: p.count,
         }))}
+        activityRecencyBuckets={[
+          { label: "0-30d", value: Number(recency.active_30 || 0) },
+          { label: "31-90d", value: Number(recency.active_31_90 || 0) },
+          { label: "91-180d", value: Number(recency.active_91_180 || 0) },
+          { label: "180d+", value: Number(recency.active_180_plus || 0) },
+          { label: "No activity", value: Number(recency.no_activity || 0) },
+        ]}
       />
 
       <Card>
         <CardHeader>
           <CardTitle>Inventory</CardTitle>
           <CardDescription>
-            {formatNumber(total)} sites • showing {formatNumber(rows.length)}
+            {formatNumber(total)} SharePoint sites • showing {formatNumber(rows.length)}
           </CardDescription>
         </CardHeader>
         <CardContent className="overflow-x-auto">

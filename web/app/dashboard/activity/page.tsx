@@ -39,6 +39,8 @@ async function ActivityPage({ searchParams }: { searchParams?: Promise<SearchPar
 
   const sortMap: Record<string, string> = {
     site: "title",
+    availability: "is_available",
+    lastAvailable: "last_available_at",
     modified: "modified_items",
     shares: "shares",
     activeUsers: "active_users",
@@ -50,7 +52,8 @@ async function ActivityPage({ searchParams }: { searchParams?: Promise<SearchPar
   const summaryParams = windowStart ? [...params, windowStart] : [...params];
   const activityBaseCte = `
       WITH base AS (
-        SELECT site_key, route_drive_id, title, web_url, is_personal, template, storage_used_bytes, storage_total_bytes, last_activity_dt
+        SELECT site_key, route_drive_id, title, web_url, is_personal, template, is_available, last_available_at,
+               availability_reason, storage_used_bytes, storage_total_bytes, last_activity_dt
         FROM mv_msgraph_routable_site_drives
         ${clause}
       ), activity AS (

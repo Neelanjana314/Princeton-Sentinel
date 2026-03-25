@@ -10,6 +10,7 @@ export const ROUTABLE_SITE_DRIVES_CTE = `
       web_url,
       created_dt,
       is_personal,
+      is_dashboard_sharepoint,
       is_available,
       last_available_at,
       availability_reason,
