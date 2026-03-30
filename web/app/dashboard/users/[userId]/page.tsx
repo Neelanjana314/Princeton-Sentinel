@@ -11,6 +11,9 @@ import { query } from "@/app/lib/db";
 import { formatIsoDateTime, safeDecode } from "@/app/lib/format";
 import { getPagination, getParam, getWindowDays, SearchParams } from "@/app/lib/params";
 import { DRIVE_SITE_KEY_EXPR, ROUTABLE_SITE_DRIVES_CTE } from "@/app/lib/site-drive-routing";
+import PageHeader from "@/components/page-header";
+import MetricGrid from "@/components/metric-grid";
+import { MetricCard } from "@/components/metric-card";
 
 import { UserRecentItemsTable, UserTopSitesTable } from "./user-detail-tables";
 
@@ -29,13 +32,29 @@ async function UserDetailPage({
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
 
   const userId = safeDecode(encodedUserId);
-  const windowDays = getWindowDays(resolvedSearchParams, 90);
-  const daysParam = getParam(resolvedSearchParams, "days") || "90";
+  const windowDays = getParam(resolvedSearchParams, "days") ? getWindowDays(resolvedSearchParams, 90) : null;
+  const daysParam = getParam(resolvedSearchParams, "days") || "all";
   const windowStart = windowDays ? new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000).toISOString() : null;
   const { page, pageSize } = getPagination(resolvedSearchParams, { page: 1, pageSize: 25 });
 
   const userRows = await query<any>(
-    `SELECT id, display_name, mail, user_principal_name FROM msgraph_users WHERE id = $1 AND deleted_at IS NULL`,
+    `
+    SELECT
+      id,
+      display_name,
+      mail,
+      user_principal_name,
+      user_type,
+      department,
+      job_title,
+      created_dt,
+      synced_at,
+      is_available,
+      last_available_at,
+      availability_reason
+    FROM msgraph_users
+    WHERE id = $1 AND deleted_at IS NULL
+    `,
     [userId]
   );
   const user = userRows[0];
@@ -134,52 +153,65 @@ async function UserDetailPage({
 
   const summary = summaryRows[0] || {};
   const displayName = user?.display_name || user?.mail || user?.user_principal_name || userId;
+  const primaryIdentifier = user?.mail || user?.user_principal_name || userId;
+  const availabilityLabel = user?.is_available === false ? "Unavailable" : "Available";
+  const availabilityDetail = user?.is_available === false
+    ? user?.availability_reason || formatIsoDateTime(user?.last_available_at)
+    : formatIsoDateTime(user?.last_available_at);
 
   return (
     <main className="ps-page">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
-          <h1 className="truncate text-2xl font-semibold">{displayName}</h1>
-          <p className="mt-1 truncate text-xs text-muted-foreground">{userId}</p>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Window: {windowDays == null ? "All-time" : `${windowDays}d`} • Last modified {formatIsoDateTime(summary.last_modified_dt)} • Last sign-in {formatIsoDateTime(null)}
-          </p>
-          <p className="mt-2 text-xs uppercase tracking-[0.3em] text-muted-foreground">Cached (DB)</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-3 text-sm">
-          <Link className="text-muted-foreground hover:underline" href={`/dashboard/users?days=${windowDays == null ? "all" : String(windowDays)}`}>
-            Users
-          </Link>
-          <form className="flex flex-wrap items-center gap-2" action={`/dashboard/users/${encodeURIComponent(userId)}`} method="get">
-            <select
-              name="days"
-              defaultValue={daysParam}
-              className="h-9 rounded-md border border-input bg-background px-2 py-1 text-sm"
-              title="Window"
-            >
-              <option value="all">All-time</option>
-              <option value="7">7d</option>
-              <option value="30">30d</option>
-              <option value="90">90d</option>
-              <option value="365">365d</option>
-            </select>
-            <Input
-              name="pageSize"
-              type="number"
-              min={10}
-              max={200}
-              defaultValue={String(pageSize)}
-              className="h-9 w-24"
-              title="Page size"
-            />
-            <Button type="submit" variant="outline" size="sm">
-              Apply
-            </Button>
-          </form>
-        </div>
+      <PageHeader
+        title={displayName}
+        subtitle={`Directory profile for ${primaryIdentifier}. Activity panels below use the ${windowDays == null ? "all-time" : `${windowDays}d`} window.`}
+        actions={
+          <>
+            <Link className="text-muted-foreground hover:underline" href="/dashboard/users">
+              Users
+            </Link>
+            <form className="flex flex-wrap items-center gap-2" action={`/dashboard/users/${encodeURIComponent(userId)}`} method="get">
+              <select
+                name="days"
+                defaultValue={daysParam}
+                className="h-9 rounded-md border border-input bg-background px-2 py-1 text-sm"
+                title="Activity window"
+              >
+                <option value="all">All-time</option>
+                <option value="7">7d</option>
+                <option value="30">30d</option>
+                <option value="90">90d</option>
+                <option value="365">365d</option>
+              </select>
+              <Input
+                name="pageSize"
+                type="number"
+                min={10}
+                max={200}
+                defaultValue={String(pageSize)}
+                className="h-9 w-24"
+                title="Page size"
+              />
+              <Button type="submit" variant="outline" size="sm">
+                Apply
+              </Button>
+            </form>
+          </>
+        }
+      />
+
+      <div className="space-y-1 text-sm text-muted-foreground">
+        <p>{userId}</p>
+        <p>Created {formatIsoDateTime(user.created_dt)} • Last synced {formatIsoDateTime(user.synced_at)}</p>
       </div>
 
-      <div className="grid gap-3 md:grid-cols-4">
+      <MetricGrid className="xl:grid-cols-4">
+        <MetricCard label="User Type" value={user.user_type ?? "—"} />
+        <MetricCard label="Department" value={user.department ?? "—"} />
+        <MetricCard label="Job Title" value={user.job_title ?? "—"} />
+        <MetricCard label="Availability" value={availabilityLabel} detail={availabilityDetail} />
+      </MetricGrid>
+
+      <div className="grid gap-3 md:grid-cols-3">
         <Card className="text-center">
           <CardHeader>
             <CardTitle className="text-3xl font-bold">{Number(summary.modified_items || 0).toLocaleString()}</CardTitle>
@@ -195,20 +227,14 @@ async function UserDetailPage({
         <Card className="text-center">
           <CardHeader>
             <CardTitle className="text-lg font-semibold">{formatIsoDateTime(summary.last_modified_dt)}</CardTitle>
-            <CardDescription>Last modified</CardDescription>
-          </CardHeader>
-        </Card>
-        <Card className="text-center">
-          <CardHeader>
-            <CardTitle className="text-lg font-semibold">{formatIsoDateTime(null)}</CardTitle>
-            <CardDescription>Last successful sign-in</CardDescription>
+            <CardDescription>Last modified activity</CardDescription>
           </CardHeader>
         </Card>
       </div>
 
       <Card>
         <CardHeader>
-          <CardTitle>Top sites</CardTitle>
+          <CardTitle>Top sites by activity</CardTitle>
           <CardDescription>Sites where this user is currently `lastModifiedBy` for items (window: {windowDays == null ? "All-time" : `${windowDays}d`})</CardDescription>
         </CardHeader>
         <CardContent className="overflow-x-auto">

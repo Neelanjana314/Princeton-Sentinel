@@ -44,6 +44,7 @@ async function GroupsPage({ searchParams }: { searchParams?: Promise<SearchParam
 
   const { clause, params } = buildSearchFilter(search);
   const whereClause = clause || "WHERE g.deleted_at IS NULL";
+  const graphWhereClause = "WHERE g.deleted_at IS NULL";
 
   const [rows, countRows, topGroupRows, visibilityBreakdown] = await Promise.all([
     query<any>(
@@ -75,21 +76,21 @@ async function GroupsPage({ searchParams }: { searchParams?: Promise<SearchParam
         COALESCE(mc.member_count, 0) AS member_count
       FROM msgraph_groups g
       LEFT JOIN mv_msgraph_group_member_counts mc ON mc.group_id = g.id
-      ${whereClause}
+      ${graphWhereClause}
       ORDER BY member_count DESC NULLS LAST, g.display_name ASC NULLS LAST, g.id ASC
       LIMIT 10
       `,
-      params
+      []
     ),
     query<any>(
       `
       SELECT COALESCE(g.visibility, 'unknown') AS visibility, COUNT(*)::int AS count
       FROM msgraph_groups g
-      ${whereClause}
+      ${graphWhereClause}
       GROUP BY COALESCE(g.visibility, 'unknown')
       ORDER BY count DESC
       `,
-      params
+      []
     ),
   ]);
   const total = countRows[0]?.total || 0;

@@ -11,10 +11,10 @@ type UserRow = {
   display_name: string | null;
   mail: string | null;
   user_principal_name: string | null;
-  modified_items: number;
-  sites_touched: number;
-  last_modified_dt: string | null;
-  last_sign_in_dt: string | null;
+  user_type: string | null;
+  department: string | null;
+  job_title: string | null;
+  synced_at: string | null;
 };
 
 function parseIsoToTs(value: string | null | undefined): number | null {
@@ -23,12 +23,7 @@ function parseIsoToTs(value: string | null | undefined): number | null {
   return Number.isFinite(ts) ? ts : null;
 }
 
-function windowLabel(windowDays: number | null): string {
-  return windowDays == null ? "All-time" : `${windowDays}d`;
-}
-
-export function UsersTable({ items, windowDays }: { items: UserRow[]; windowDays: number | null }) {
-  const daysParam = windowDays == null ? "all" : String(windowDays);
+export function UsersTable({ items }: { items: UserRow[] }) {
   const columns = React.useMemo(
     () => [
       {
@@ -37,10 +32,7 @@ export function UsersTable({ items, windowDays }: { items: UserRow[]; windowDays
         sortValue: (u: UserRow) => u.display_name ?? u.mail ?? u.user_principal_name ?? u.user_id,
         cell: (u: UserRow) => (
           <div className="flex flex-col">
-            <Link
-              className="font-medium hover:underline"
-              href={`/dashboard/users/${encodeURIComponent(u.user_id)}?days=${daysParam}`}
-            >
+            <Link className="font-medium hover:underline" href={`/dashboard/users/${encodeURIComponent(u.user_id)}`}>
               {u.display_name ?? u.mail ?? u.user_principal_name ?? u.user_id}
             </Link>
             <span className="truncate text-xs text-muted-foreground">{u.mail ?? u.user_principal_name ?? u.user_id}</span>
@@ -49,31 +41,31 @@ export function UsersTable({ items, windowDays }: { items: UserRow[]; windowDays
         cellClassName: "max-w-[520px]",
       },
       {
-        id: "modified",
-        header: `Items last modified (${windowLabel(windowDays)})`,
-        sortValue: (u: UserRow) => u.modified_items,
-        cell: (u: UserRow) => <span className="text-muted-foreground">{u.modified_items.toLocaleString()}</span>,
+        id: "type",
+        header: "User Type",
+        sortValue: (u: UserRow) => u.user_type ?? "",
+        cell: (u: UserRow) => <span className="text-muted-foreground">{u.user_type ?? "—"}</span>,
       },
       {
-        id: "sites",
-        header: `Sites (${windowLabel(windowDays)})`,
-        sortValue: (u: UserRow) => u.sites_touched,
-        cell: (u: UserRow) => <span className="text-muted-foreground">{u.sites_touched.toLocaleString()}</span>,
+        id: "department",
+        header: "Department",
+        sortValue: (u: UserRow) => u.department ?? "",
+        cell: (u: UserRow) => <span className="text-muted-foreground">{u.department ?? "—"}</span>,
       },
       {
-        id: "lastModified",
-        header: "Last modified",
-        sortValue: (u: UserRow) => parseIsoToTs(u.last_modified_dt),
-        cell: (u: UserRow) => <span className="text-muted-foreground">{formatIsoDateTime(u.last_modified_dt)}</span>,
+        id: "title",
+        header: "Job Title",
+        sortValue: (u: UserRow) => u.job_title ?? "",
+        cell: (u: UserRow) => <span className="text-muted-foreground">{u.job_title ?? "—"}</span>,
       },
       {
-        id: "lastSignIn",
-        header: "Last successful sign-in",
-        sortValue: (u: UserRow) => parseIsoToTs(u.last_sign_in_dt),
-        cell: (u: UserRow) => <span className="text-muted-foreground">{formatIsoDateTime(u.last_sign_in_dt)}</span>,
+        id: "synced",
+        header: "Last Synced",
+        sortValue: (u: UserRow) => parseIsoToTs(u.synced_at),
+        cell: (u: UserRow) => <span className="text-muted-foreground">{formatIsoDateTime(u.synced_at)}</span>,
       },
     ],
-    [daysParam, windowDays]
+    []
   );
 
   return (

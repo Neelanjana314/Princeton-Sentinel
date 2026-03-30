@@ -50,6 +50,7 @@ async function ActivityPage({ searchParams }: { searchParams?: Promise<SearchPar
   const sortColumn = sortMap[sort] || "last_activity_dt";
   const { clause, params } = buildSearchFilter(search);
   const summaryParams = windowStart ? [...params, windowStart] : [...params];
+  const graphSummaryParams = windowStart ? [windowStart] : [];
   const activityBaseCte = `
       WITH base AS (
         SELECT site_key, route_drive_id, title, web_url, is_personal, template, is_available, last_available_at,
@@ -65,6 +66,23 @@ async function ActivityPage({ searchParams }: { searchParams?: Promise<SearchPar
         FROM mv_msgraph_site_activity_daily d
         JOIN base b ON b.site_key = d.site_key
         ${windowStart ? `WHERE d.day >= date_trunc('day', $${params.length + 1}::timestamptz)` : ""}
+        GROUP BY d.site_key
+      )
+    `;
+  const graphActivityBaseCte = `
+      WITH base AS (
+        SELECT site_key, route_drive_id, title, web_url, is_personal, template, is_available, last_available_at,
+               availability_reason, storage_used_bytes, storage_total_bytes, last_activity_dt
+        FROM mv_msgraph_routable_site_drives
+      ), activity AS (
+        SELECT
+          d.site_key,
+          COALESCE(SUM(d.modified_items), 0)::int AS modified_items,
+          COALESCE(SUM(d.active_users), 0)::int AS active_users,
+          COALESCE(SUM(d.shares), 0)::int AS shares
+        FROM mv_msgraph_site_activity_daily d
+        JOIN base b ON b.site_key = d.site_key
+        ${windowStart ? `WHERE d.day >= date_trunc('day', $1::timestamptz)` : ""}
         GROUP BY d.site_key
       )
     `;
@@ -87,7 +105,7 @@ async function ActivityPage({ searchParams }: { searchParams?: Promise<SearchPar
     ),
     query<any>(
       `
-      ${activityBaseCte}
+      ${graphActivityBaseCte}
       SELECT
         b.title,
         b.route_drive_id,
@@ -97,11 +115,11 @@ async function ActivityPage({ searchParams }: { searchParams?: Promise<SearchPar
       ORDER BY active_users DESC NULLS LAST, b.title ASC NULLS LAST, b.route_drive_id ASC
       LIMIT 10
       `,
-      summaryParams
+      graphSummaryParams
     ),
     query<any>(
       `
-      ${activityBaseCte}
+      ${graphActivityBaseCte}
       SELECT
         b.title,
         b.route_drive_id,
@@ -112,7 +130,7 @@ async function ActivityPage({ searchParams }: { searchParams?: Promise<SearchPar
       ORDER BY (COALESCE(a.shares, 0) + COALESCE(a.modified_items, 0)) DESC NULLS LAST, b.title ASC NULLS LAST, b.route_drive_id ASC
       LIMIT 10
       `,
-      summaryParams
+      graphSummaryParams
     ),
   ]);
   const total = countRows[0]?.total || 0;

@@ -88,6 +88,47 @@ async function RiskPage({ searchParams }: { searchParams?: Promise<SearchParams>
       SELECT * FROM flagged WHERE flag_count > 0
     )
   `;
+  const graphFlaggedBase = `
+    WITH base AS (
+      SELECT
+        i.site_key,
+        i.route_drive_id,
+        i.title,
+        i.web_url,
+        i.is_personal,
+        i.storage_used_bytes,
+        i.storage_total_bytes,
+        i.last_activity_dt,
+        COALESCE(s.sharing_links, 0) AS sharing_links,
+        COALESCE(s.anonymous_links, 0) AS anonymous_links,
+        COALESCE(s.organization_links, 0) AS organization_links,
+        COALESCE(e.guest_users, 0) AS guest_users,
+        COALESCE(e.external_users, 0) AS external_users
+      FROM mv_msgraph_routable_site_drives i
+      LEFT JOIN mv_msgraph_site_sharing_summary s ON s.site_key = i.site_key
+      LEFT JOIN mv_msgraph_site_external_principals e ON e.site_key = i.site_key
+    ),
+    flagged AS (
+      SELECT
+        b.*,
+        (b.last_activity_dt IS NULL OR b.last_activity_dt < now() - ($1::int * interval '1 day')) AS dormant,
+        (COALESCE(b.anonymous_links, 0) > 0) AS "anonymousLinksSignal",
+        (COALESCE(b.organization_links, 0) > 0) AS "orgLinksSignal",
+        (COALESCE(b.external_users, 0) > 0) AS "externalUsersSignal",
+        (COALESCE(b.guest_users, 0) > 0) AS "guestUsersSignal",
+        (
+          CASE WHEN (b.last_activity_dt IS NULL OR b.last_activity_dt < now() - ($1::int * interval '1 day')) THEN 1 ELSE 0 END +
+          CASE WHEN COALESCE(b.anonymous_links, 0) > 0 THEN 1 ELSE 0 END +
+          CASE WHEN COALESCE(b.organization_links, 0) > 0 THEN 1 ELSE 0 END +
+          CASE WHEN COALESCE(b.external_users, 0) > 0 THEN 1 ELSE 0 END +
+          CASE WHEN COALESCE(b.guest_users, 0) > 0 THEN 1 ELSE 0 END
+        )::int AS flag_count
+      FROM base b
+    ),
+    filtered AS (
+      SELECT * FROM flagged WHERE flag_count > 0
+    )
+  `;
 
   const countRows = await query<any>(
     `
@@ -134,18 +175,18 @@ async function RiskPage({ searchParams }: { searchParams?: Promise<SearchParams>
     ),
     query<any>(
       `
-      ${flaggedBase}
+      ${graphFlaggedBase}
       SELECT title, route_drive_id, storage_used_bytes
       FROM filtered
       WHERE storage_used_bytes IS NOT NULL
       ORDER BY storage_used_bytes DESC NULLS LAST
       LIMIT 10
       `,
-      [...params, dormantDays]
+      [dormantDays]
     ),
     query<any>(
       `
-      ${flaggedBase}
+      ${graphFlaggedBase}
       SELECT
         COUNT(*) FILTER (WHERE flag_count > 1)::int AS multiple_signals,
         COUNT(*) FILTER (WHERE flag_count = 1 AND "anonymousLinksSignal")::int AS anonymous_links,
@@ -154,7 +195,7 @@ async function RiskPage({ searchParams }: { searchParams?: Promise<SearchParams>
         COUNT(*) FILTER (WHERE flag_count = 1 AND dormant)::int AS dormant
       FROM filtered
       `,
-      [...params, dormantDays]
+      [dormantDays]
     ),
     query<any>(
       `

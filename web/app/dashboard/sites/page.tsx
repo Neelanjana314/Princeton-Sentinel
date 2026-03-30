@@ -63,9 +63,8 @@ async function SitesPage({ searchParams }: { searchParams?: Promise<SearchParams
         COUNT(*) FILTER (WHERE created_dt >= now() - interval '90 days')::int AS new_90
       FROM mv_msgraph_routable_site_drives
       WHERE ${DASHBOARD_SHAREPOINT_FILTER}
-      ${clause ? `AND ${clause.replace(/^WHERE\s+/i, "")}` : ""}
       `,
-      params
+      []
     ),
     query<any>(
       `
@@ -73,12 +72,11 @@ async function SitesPage({ searchParams }: { searchParams?: Promise<SearchParams
       FROM mv_msgraph_routable_site_drives
       WHERE created_dt IS NOT NULL
         AND ${DASHBOARD_SHAREPOINT_FILTER}
-        ${clause ? `AND ${clause.replace(/^WHERE\s+/i, "")}` : ""}
       GROUP BY date_trunc('month', created_dt)
       ORDER BY month DESC
       LIMIT 12
       `,
-      params
+      []
     ),
     query<any>(
       `
@@ -96,9 +94,8 @@ async function SitesPage({ searchParams }: { searchParams?: Promise<SearchParams
         COUNT(*) FILTER (WHERE last_activity_dt IS NULL)::int AS no_activity
       FROM mv_msgraph_routable_site_drives
       WHERE ${DASHBOARD_SHAREPOINT_FILTER}
-      ${clause ? `AND ${clause.replace(/^WHERE\s+/i, "")}` : ""}
       `,
-      params
+      []
     ),
     query<any>(
       `

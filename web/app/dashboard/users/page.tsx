@@ -14,10 +14,17 @@ import FilterBar from "@/components/filter-bar";
 import MetricGrid from "@/components/metric-grid";
 import { MetricCard } from "@/components/metric-card";
 
-function buildSearchClause(search: string | null, startIndex: number) {
+function buildSearchClause(search: string | null) {
   if (!search) return { clause: "", params: [] as any[] };
   const pattern = `%${search.toLowerCase()}%`;
-  const clause = `AND (LOWER(u.display_name) LIKE $${startIndex} OR LOWER(u.mail) LIKE $${startIndex} OR LOWER(u.user_principal_name) LIKE $${startIndex} OR LOWER(a.user_id) LIKE $${startIndex})`;
+  const clause = `
+    AND (
+      LOWER(COALESCE(u.display_name, '')) LIKE $1
+      OR LOWER(COALESCE(u.mail, '')) LIKE $1
+      OR LOWER(COALESCE(u.user_principal_name, '')) LIKE $1
+      OR LOWER(u.id) LIKE $1
+    )
+  `;
   return { clause, params: [pattern] };
 }
 
@@ -29,72 +36,99 @@ async function UsersPage({ searchParams }: { searchParams?: Promise<SearchParams
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
 
   const search = getParam(resolvedSearchParams, "q");
-  const windowDays = getWindowDays(resolvedSearchParams, 90);
+  const windowDays = getParam(resolvedSearchParams, "days") ? getWindowDays(resolvedSearchParams, 90) : null;
   const windowStart = windowDays ? new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000).toISOString() : null;
   const { page, pageSize, offset } = getPagination(resolvedSearchParams, { page: 1, pageSize: 50 });
-  const sort = getParam(resolvedSearchParams, "sort") || "modified";
-  const dir = getSortDirection(resolvedSearchParams, "desc");
+  const sort = getParam(resolvedSearchParams, "sort") || "user";
+  const dir = getSortDirection(resolvedSearchParams, "asc");
 
   const sortMap: Record<string, string> = {
-    user: "display_name",
-    modified: "modified_items",
-    sites: "sites_touched",
-    lastModified: "last_modified_dt",
+    user: "COALESCE(display_name, mail, user_principal_name, user_id)",
+    email: "COALESCE(mail, user_principal_name, '')",
+    type: "user_type",
+    department: "department",
+    title: "job_title",
+    synced: "synced_at",
   };
-  const sortColumn = sortMap[sort] || "modified_items";
+  const sortColumn = sortMap[sort] || sortMap.user;
 
-  const searchClause = buildSearchClause(search, windowStart ? 2 : 1);
-  const summaryParams = windowStart ? [windowStart, ...searchClause.params] : [...searchClause.params];
+  const searchClause = buildSearchClause(search);
+  const params = [...searchClause.params];
+  const usersDirectoryCte = `
+    WITH filtered AS (
+      SELECT
+        u.id AS user_id,
+        u.display_name,
+        u.mail,
+        u.user_principal_name,
+        u.user_type,
+        u.department,
+        u.job_title,
+        u.synced_at
+      FROM msgraph_users u
+      WHERE 1=1
+        AND u.deleted_at IS NULL
+        AND u.account_enabled IS TRUE
+        ${searchClause.clause}
+    )
+  `;
+  const graphActivityParams = windowStart ? [windowStart] : [];
   const usersActivityCte = `
-    WITH activity AS (
+    WITH filtered_users AS (
+      SELECT
+        u.id AS user_id,
+        u.display_name,
+        u.mail,
+        u.user_principal_name
+      FROM msgraph_users u
+      WHERE 1=1
+        AND u.deleted_at IS NULL
+        AND u.account_enabled IS TRUE
+    ), activity AS (
       SELECT
         i.last_modified_by_user_id AS user_id,
         COUNT(*)::int AS modified_items,
-        COUNT(DISTINCT COALESCE(d.site_id, d.id))::int AS sites_touched,
-        MAX(i.modified_dt) AS last_modified_dt
+        COUNT(DISTINCT COALESCE(d.site_id, d.id))::int AS sites_touched
       FROM msgraph_drive_items i
       JOIN msgraph_drives d ON d.id = i.drive_id
-      WHERE i.deleted_at IS NULL AND d.deleted_at IS NULL
+      WHERE i.deleted_at IS NULL
+        AND d.deleted_at IS NULL
         AND LOWER(COALESCE(d.web_url, '')) NOT LIKE '%cachelibrary%'
         AND i.last_modified_by_user_id IS NOT NULL
         ${windowStart ? "AND i.modified_dt >= $1" : ""}
       GROUP BY i.last_modified_by_user_id
     ), filtered AS (
       SELECT
-        a.user_id,
-        u.display_name,
-        u.mail,
-        u.user_principal_name,
-        a.modified_items,
-        a.sites_touched,
-        a.last_modified_dt,
-        NULL::timestamptz AS last_sign_in_dt
-      FROM activity a
-      LEFT JOIN msgraph_users u ON u.id = a.user_id AND u.deleted_at IS NULL
-      WHERE 1=1
-        ${searchClause.clause}
+        fu.user_id,
+        fu.display_name,
+        fu.mail,
+        fu.user_principal_name,
+        COALESCE(a.modified_items, 0) AS modified_items,
+        COALESCE(a.sites_touched, 0) AS sites_touched
+      FROM filtered_users fu
+      LEFT JOIN activity a ON a.user_id = fu.user_id
     )
   `;
 
   const [rows, totalRows, topByModifiedRows, topBySitesRows] = await Promise.all([
     query<any>(
       `
-      ${usersActivityCte}
+      ${usersDirectoryCte}
       SELECT *
       FROM filtered
       ORDER BY ${sortColumn} ${dir.toUpperCase()} NULLS LAST
-      LIMIT $${summaryParams.length + 1}
-      OFFSET $${summaryParams.length + 2}
+      LIMIT $${params.length + 1}
+      OFFSET $${params.length + 2}
       `,
-      [...summaryParams, pageSize, offset]
+      [...params, pageSize, offset]
     ),
     query<any>(
       `
-      ${usersActivityCte}
+      ${usersDirectoryCte}
       SELECT COUNT(*)::int AS total
       FROM filtered
       `,
-      summaryParams
+      params
     ),
     query<any>(
       `
@@ -104,7 +138,7 @@ async function UsersPage({ searchParams }: { searchParams?: Promise<SearchParams
       ORDER BY modified_items DESC NULLS LAST, display_name ASC NULLS LAST, user_id ASC
       LIMIT 10
       `,
-      summaryParams
+      graphActivityParams
     ),
     query<any>(
       `
@@ -114,28 +148,25 @@ async function UsersPage({ searchParams }: { searchParams?: Promise<SearchParams
       ORDER BY sites_touched DESC NULLS LAST, display_name ASC NULLS LAST, user_id ASC
       LIMIT 10
       `,
-      summaryParams
+      graphActivityParams
     ),
   ]);
 
   const total = totalRows[0]?.total || 0;
-
   const topByModified = topByModifiedRows.map((u) => ({
     label: u.display_name ?? u.user_id,
     value: u.modified_items ?? 0,
   }));
-
   const topBySites = topBySitesRows.map((u) => ({
     label: u.display_name ?? u.user_id,
     value: u.sites_touched ?? 0,
   }));
-  const activeUsersPct = total > 0 ? (topByModified.reduce((acc, u) => acc + u.value, 0) / total).toFixed(1) : "0.0";
 
   return (
     <main className="ps-page">
       <PageHeader
         title="Users"
-        subtitle={`Based on current last modifier ownership on items. Window: ${windowDays ?? "all"}d.`}
+        subtitle={`Directory-backed active users matching the overview dashboard metric. Activity charts use the ${windowDays == null ? "all-time" : `${windowDays}d`} window.`}
       />
       <form action="/dashboard/users" method="get">
         <FilterBar>
@@ -144,7 +175,7 @@ async function UsersPage({ searchParams }: { searchParams?: Promise<SearchParams
             name="days"
             defaultValue={windowDays == null ? "all" : String(windowDays)}
             className="h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
-            title="Window"
+            title="Activity window"
           >
             <option value="all">All-time</option>
             <option value="7">7d</option>
@@ -167,15 +198,15 @@ async function UsersPage({ searchParams }: { searchParams?: Promise<SearchParams
         </FilterBar>
       </form>
 
-      <MetricGrid className="lg:grid-cols-2">
-        <MetricCard label="Total Users" value={formatNumber(total)} />
-        <MetricCard label="Top-10 Activity Density" value={`${activeUsersPct}%`} detail="Top 10 users total modified items / user count" />
+      <MetricGrid className="md:grid-cols-1 lg:grid-cols-1">
+        <MetricCard label="Active Users" value={formatNumber(total)} className="max-w-sm" />
       </MetricGrid>
 
       <div className="grid w-full grid-cols-1 gap-6 md:grid-cols-2">
         <Card className="w-full">
           <CardHeader>
             <CardTitle>Top 10 Users by Items Last Modified</CardTitle>
+            <CardDescription>Activity window: {windowDays == null ? "All-time" : `${windowDays}d`}</CardDescription>
           </CardHeader>
           <CardContent className="w-full flex items-center justify-center">
             <div className="w-full h-72 flex items-center justify-center">
@@ -186,6 +217,7 @@ async function UsersPage({ searchParams }: { searchParams?: Promise<SearchParams
         <Card className="w-full">
           <CardHeader>
             <CardTitle>Top 10 Users by Sites</CardTitle>
+            <CardDescription>Activity window: {windowDays == null ? "All-time" : `${windowDays}d`}</CardDescription>
           </CardHeader>
           <CardContent className="w-full flex items-center justify-center">
             <div className="w-full h-72 flex items-center justify-center">
@@ -197,13 +229,13 @@ async function UsersPage({ searchParams }: { searchParams?: Promise<SearchParams
 
       <Card>
         <CardHeader>
-          <CardTitle>Active users</CardTitle>
+          <CardTitle>Active Users</CardTitle>
           <CardDescription>
-            {formatNumber(total)} users • showing {formatNumber(rows.length)} • click a user for details
+            {formatNumber(total)} users • showing {formatNumber(rows.length)} • click a user for directory details and activity
           </CardDescription>
         </CardHeader>
         <CardContent className="overflow-x-auto">
-          <UsersTable items={rows} windowDays={windowDays} />
+          <UsersTable items={rows} />
         </CardContent>
       </Card>
 
