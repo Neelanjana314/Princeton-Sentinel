@@ -24,7 +24,8 @@ export function getNumberParam(
 
 export function getSortDirection(searchParams: SearchParams | undefined, fallback: "asc" | "desc" = "desc") {
   const dir = (getParam(searchParams, "dir") || "").toLowerCase();
-  return dir === "asc" ? "asc" : fallback;
+  if (dir === "asc" || dir === "desc") return dir;
+  return fallback;
 }
 
 export function getWindowDays(searchParams: SearchParams | undefined, fallback: number) {
