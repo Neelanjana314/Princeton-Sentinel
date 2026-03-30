@@ -172,19 +172,20 @@ async function SharingPage({ searchParams }: { searchParams?: Promise<SearchPara
           <CardTitle>Link breakdown</CardTitle>
           <CardDescription>From permissions link scope and type.</CardDescription>
         </CardHeader>
-        <CardContent className="overflow-x-auto space-y-3">
+        <CardContent className="overflow-x-auto">
           <SharingLinkBreakdownTable breakdown={breakdownRows} />
-          <Pagination
-            pathname="/dashboard/sharing"
-            page={lbPage}
-            pageSize={lbPageSize}
-            totalItems={lbTotal}
-            pageParam="lbPage"
-            pageSizeParam="lbPageSize"
-            extraParams={{ q: search || undefined, externalThreshold, page, pageSize, sort, dir }}
-          />
         </CardContent>
       </Card>
+
+      <Pagination
+        pathname="/dashboard/sharing"
+        page={lbPage}
+        pageSize={lbPageSize}
+        totalItems={lbTotal}
+        pageParam="lbPage"
+        pageSizeParam="lbPageSize"
+        extraParams={{ q: search || undefined, externalThreshold, page, pageSize, sort, dir }}
+      />
 
       <Card>
         <CardHeader>
