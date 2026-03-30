@@ -4,7 +4,7 @@ import Link from "next/link";
 import * as React from "react";
 
 import { SortableTable } from "@/components/sortable-table";
-import { formatIsoDateTime } from "@/app/lib/format";
+import { formatIsoDate } from "@/app/lib/format";
 
 type UserRow = {
   user_id: string;
@@ -14,7 +14,7 @@ type UserRow = {
   user_type: string | null;
   department: string | null;
   job_title: string | null;
-  synced_at: string | null;
+  created_dt: string | null;
 };
 
 function parseIsoToTs(value: string | null | undefined): number | null {
@@ -59,10 +59,10 @@ export function UsersTable({ items }: { items: UserRow[] }) {
         cell: (u: UserRow) => <span className="text-muted-foreground">{u.job_title ?? "—"}</span>,
       },
       {
-        id: "synced",
-        header: "Last Synced",
-        sortValue: (u: UserRow) => parseIsoToTs(u.synced_at),
-        cell: (u: UserRow) => <span className="text-muted-foreground">{formatIsoDateTime(u.synced_at)}</span>,
+        id: "created",
+        header: "Created",
+        sortValue: (u: UserRow) => parseIsoToTs(u.created_dt),
+        cell: (u: UserRow) => <span className="text-muted-foreground">{formatIsoDate(u.created_dt)}</span>,
       },
     ],
     []

@@ -48,7 +48,8 @@ async function UsersPage({ searchParams }: { searchParams?: Promise<SearchParams
     type: "user_type",
     department: "department",
     title: "job_title",
-    synced: "synced_at",
+    created: "created_dt",
+    synced: "created_dt",
   };
   const sortColumn = sortMap[sort] || sortMap.user;
 
@@ -64,7 +65,7 @@ async function UsersPage({ searchParams }: { searchParams?: Promise<SearchParams
         u.user_type,
         u.department,
         u.job_title,
-        u.synced_at
+        u.created_dt
       FROM msgraph_users u
       WHERE 1=1
         AND u.deleted_at IS NULL

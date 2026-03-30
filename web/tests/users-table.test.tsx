@@ -51,7 +51,7 @@ test("users table renders directory columns and row links without days params", 
           user_type: "Member",
           department: "IT",
           job_title: "Administrator",
-          synced_at: "2026-03-28T10:00:00.000Z",
+          created_dt: "2026-03-28T10:00:00.000Z",
         },
       ],
     })
@@ -60,7 +60,7 @@ test("users table renders directory columns and row links without days params", 
   assert.match(markup, /User Type/);
   assert.match(markup, /Department/);
   assert.match(markup, /Job Title/);
-  assert.match(markup, /Last Synced/);
+  assert.match(markup, /Created/);
   assert.match(markup, /href="\/dashboard\/users\/user-123"/);
   assert.doesNotMatch(markup, /days=/);
 });
