@@ -34,7 +34,7 @@ COPY app ./app
 
 EXPOSE 5000
 
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "1", "--threads", "4", "app.main:app"]
+CMD ["python", "-m", "gunicorn", "--bind", "0.0.0.0:5000", "--workers", "1", "--threads", "4", "app.main:app"]
 EOF
 
 if find "${app_dir}" -type f -name '*.py' | grep -q .; then
@@ -50,5 +50,14 @@ fi
 WORKER_ENABLE_BACKGROUND_THREADS=false \
 PYTHONPATH="${vendor_dir}:${runtime_dir}" \
 "${python_bin}" -c 'from app.main import app; print(app.name)'
+
+WORKER_ENABLE_BACKGROUND_THREADS=false \
+PYTHONPATH="${vendor_dir}:${runtime_dir}" \
+"${python_bin}" -m gunicorn \
+  --check-config \
+  --bind 0.0.0.0:5000 \
+  --workers 1 \
+  --threads 4 \
+  app.main:app
 
 echo "Packaged worker runtime at ${runtime_dir}"
