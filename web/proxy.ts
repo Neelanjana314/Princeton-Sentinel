@@ -12,6 +12,7 @@ import {
   LAST_ACCOUNT_HINT_MAX_AGE_SECONDS,
   sanitizeAccountHint,
 } from "@/app/lib/account-hint";
+import { getSessionCookieName, shouldUseSecureAuthCookies } from "@/app/lib/auth-cookies";
 import { applySecurityHeaders } from "./app/lib/security-headers";
 
 const ADMIN_PREFIXES = [
@@ -98,8 +99,8 @@ function setLastAccountHintCookie(response: NextResponse, hint: string) {
     name: LAST_ACCOUNT_HINT_COOKIE,
     value: hint,
     httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    sameSite: "strict",
+    secure: shouldUseSecureAuthCookies(),
     path: "/",
     maxAge: LAST_ACCOUNT_HINT_MAX_AGE_SECONDS,
   });
@@ -118,7 +119,12 @@ export async function proxy(req: NextRequest) {
 
   if (pathname.startsWith("/signout")) {
     const response = nextWithTiming(req, timing);
-    const token = await getToken({ req, secret: process.env.NEXTAUTH_SECRET });
+    const token = await getToken({
+      req,
+      secret: process.env.NEXTAUTH_SECRET,
+      secureCookie: shouldUseSecureAuthCookies(),
+      cookieName: getSessionCookieName(),
+    });
     const accountHint = sanitizeAccountHint(
       typeof token?.upn === "string" ? token.upn : typeof token?.email === "string" ? token.email : undefined,
     );
@@ -130,7 +136,7 @@ export async function proxy(req: NextRequest) {
     return response;
   }
 
-  if (pathname.startsWith("/signin/account")) {
+  if (pathname.startsWith("/signin/account") || pathname.startsWith("/auth/complete")) {
     const response = nextWithTiming(req, timing);
     if (req.nextUrl.searchParams.get("clearHint") === "1") {
       clearLastAccountHintCookie(response);
@@ -142,7 +148,12 @@ export async function proxy(req: NextRequest) {
     return nextWithTiming(req, timing);
   }
 
-  const token = await getToken({ req, secret: process.env.NEXTAUTH_SECRET });
+  const token = await getToken({
+    req,
+    secret: process.env.NEXTAUTH_SECRET,
+    secureCookie: shouldUseSecureAuthCookies(),
+    cookieName: getSessionCookieName(),
+  });
   if (!token) {
     if (isApiRequest(pathname)) {
       const response = applySecurityHeaders(NextResponse.json({ error: "unauthorized" }, { status: 401 }));

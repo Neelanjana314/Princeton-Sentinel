@@ -1,4 +1,5 @@
 const DEFAULT_CALLBACK_URL = "/dashboard";
+export const POST_AUTH_BRIDGE_PATH = "/auth/complete";
 
 function normalizeInput(input?: string | string[] | null): string | undefined {
   if (!input) return undefined;
@@ -26,4 +27,43 @@ export function sanitizeCallbackUrl(
 export function buildSignInAccountUrl(callbackUrl: string): string {
   const params = new URLSearchParams({ callbackUrl });
   return `/signin/account?${params.toString()}`;
+}
+
+function normalizeNextAuthCallbackTarget(url: string, baseUrl: string): string {
+  if (url.startsWith("/")) {
+    return sanitizeCallbackUrl(url);
+  }
+
+  try {
+    const parsed = new URL(url);
+    const base = new URL(baseUrl);
+    if (parsed.origin !== base.origin) {
+      return DEFAULT_CALLBACK_URL;
+    }
+    return sanitizeCallbackUrl(`${parsed.pathname}${parsed.search}${parsed.hash}`);
+  } catch {
+    return DEFAULT_CALLBACK_URL;
+  }
+}
+
+function shouldBypassPostAuthBridge(callbackUrl: string): boolean {
+  return (
+    callbackUrl.startsWith("/signin") ||
+    callbackUrl.startsWith("/signout") ||
+    callbackUrl.startsWith("/forbidden") ||
+    callbackUrl.startsWith("/403") ||
+    callbackUrl.startsWith("/api/auth") ||
+    callbackUrl.startsWith(POST_AUTH_BRIDGE_PATH)
+  );
+}
+
+export function buildPostAuthBridgeUrl(url: string, baseUrl: string): string {
+  const callbackUrl = normalizeNextAuthCallbackTarget(url, baseUrl);
+
+  if (shouldBypassPostAuthBridge(callbackUrl)) {
+    return `${baseUrl}${callbackUrl}`;
+  }
+
+  const params = new URLSearchParams({ callbackUrl });
+  return `${baseUrl}${POST_AUTH_BRIDGE_PATH}?${params.toString()}`;
 }

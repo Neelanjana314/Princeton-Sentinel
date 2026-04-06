@@ -15,6 +15,7 @@ import {
 } from "../app/lib/security-headers";
 
 const originalResolveFilename = (Module as any)._resolveFilename;
+const testEnv = process.env as Record<string, string | undefined>;
 
 function installWorkspaceAliasResolver() {
   (Module as any)._resolveFilename = function resolveFilename(request: string, parent: unknown, isMain: boolean, options: unknown) {
@@ -138,6 +139,46 @@ test("proxy adds security headers to public asset bypass responses", async () =>
     assert.equal(response.status, 200);
     assertGlobalSecurityHeaders(response.headers);
   } finally {
+    restoreWorkspaceAliasResolver();
+  }
+});
+
+test("proxy allows the post-auth bridge page without a session", async () => {
+  installWorkspaceAliasResolver();
+  try {
+    process.env.NEXTAUTH_SECRET = "test-secret";
+    setMockToken(null);
+    const { proxy } = loadProxy();
+
+    const response = await proxy(new NextRequest("http://localhost/auth/complete?callbackUrl=%2Fdashboard"));
+
+    assert.equal(response.status, 200);
+    assertGlobalSecurityHeaders(response.headers);
+  } finally {
+    restoreWorkspaceAliasResolver();
+  }
+});
+
+test("proxy sets the last-account hint cookie with strict host-only flags", async () => {
+  installWorkspaceAliasResolver();
+  try {
+    process.env.NEXTAUTH_SECRET = "test-secret";
+    testEnv.NEXTAUTH_URL = "https://localhost:3000";
+    setMockToken({ upn: "user@example.com" });
+    const { proxy } = loadProxy();
+
+    const response = await proxy(new NextRequest("https://localhost/signout"));
+    const setCookie = response.headers.get("set-cookie");
+
+    assert.equal(response.status, 200);
+    assert.ok(setCookie);
+    assert.match(setCookie!, /ps_last_account_hint=user%40example\.com/);
+    assert.match(setCookie!, /HttpOnly/i);
+    assert.match(setCookie!, /Secure/i);
+    assert.match(setCookie!, /SameSite=Strict/i);
+    assert.equal(/Domain=/i.test(setCookie!), false);
+  } finally {
+    delete testEnv.NEXTAUTH_URL;
     restoreWorkspaceAliasResolver();
   }
 });

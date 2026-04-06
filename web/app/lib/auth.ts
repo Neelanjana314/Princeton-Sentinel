@@ -1,6 +1,8 @@
 import AzureADProvider from "next-auth/providers/azure-ad";
 import type { NextAuthOptions } from "next-auth";
 import { getServerSession } from "next-auth/next";
+import { getAuthCookiePolicies } from "./auth-cookies";
+import { buildPostAuthBridgeUrl } from "./callback-url";
 
 type RequireAuthResult = {
   session: any;
@@ -60,6 +62,7 @@ export function getAuthOptions(): NextAuthOptions {
       }),
     ],
     session: { strategy: "jwt" },
+    cookies: getAuthCookiePolicies(),
     pages: {
       signIn: "/signin/account",
       signOut: "/signout",
@@ -93,6 +96,9 @@ export function getAuthOptions(): NextAuthOptions {
           (session.user as any).groups = token.groups || [];
         }
         return session;
+      },
+      async redirect({ url, baseUrl }) {
+        return buildPostAuthBridgeUrl(url, baseUrl);
       },
     },
   };
