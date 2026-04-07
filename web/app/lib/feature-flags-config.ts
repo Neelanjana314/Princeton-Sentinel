@@ -16,7 +16,7 @@ type FeatureFlagRow = {
 };
 
 const FEATURE_ROUTE_PREFIXES: Record<FeatureKey, string[]> = {
-  agents_dashboard: ["/dashboard/agents", "/dashboard/copilot", "/api/agents", "/api/copilot"],
+  agents_dashboard: ["/dashboard/agents", "/api/agents"],
   test_mode: [],
 };
 

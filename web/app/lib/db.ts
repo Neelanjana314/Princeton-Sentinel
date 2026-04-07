@@ -1,5 +1,5 @@
 import { Pool, type PoolClient } from "pg";
-import { recordDbDuration } from "@/app/lib/request-timing";
+import { beginDbTiming } from "@/app/lib/request-timing";
 
 declare global {
   // eslint-disable-next-line no-var
@@ -18,9 +18,9 @@ function getPool() {
 }
 
 export async function query<T = any>(text: string, params?: any[]): Promise<T[]> {
-  const startedAt = Date.now();
+  const endDbTiming = beginDbTiming();
   const result = await getPool().query(text, params).finally(() => {
-    recordDbDuration(Date.now() - startedAt);
+    endDbTiming();
   });
   return result.rows;
 }
@@ -34,11 +34,11 @@ function wrapClientWithTiming(client: PoolClient): PoolClient {
       }
 
       return async (...args: any[]) => {
-        const startedAt = Date.now();
+        const endDbTiming = beginDbTiming();
         try {
           return await (value as (...params: any[]) => Promise<any>).apply(target, args);
         } finally {
-          recordDbDuration(Date.now() - startedAt);
+          endDbTiming();
         }
       };
     },

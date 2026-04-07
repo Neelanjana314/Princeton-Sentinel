@@ -1,7 +1,13 @@
 import { withPageRequestTiming } from "@/app/lib/request-timing";
 import Link from "next/link";
 
-import { getRevokeLogCount, getRevokeLogsPage, itemFallback, itemPath, requestedBy } from "@/app/admin/logs/revoke-log-queries";
+import {
+  getRevokeLogCount,
+  getRevokeLogsPage,
+  itemFallback,
+  itemPath,
+  requestedBy,
+} from "@/app/admin/revoke-activity/revoke-activity-queries";
 import { requireAdmin } from "@/app/lib/auth";
 import { getPagination, SearchParams } from "@/app/lib/params";
 import { Pagination } from "@/components/pagination";
@@ -10,7 +16,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import LocalDateTime from "@/components/local-date-time";
 
-async function AdminLogsPage({ searchParams }: { searchParams?: Promise<SearchParams> }) {
+async function AdminRevokeActivityPage({ searchParams }: { searchParams?: Promise<SearchParams> }) {
   await requireAdmin();
 
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
@@ -37,7 +43,7 @@ async function AdminLogsPage({ searchParams }: { searchParams?: Promise<SearchPa
           </Button>
         </CardHeader>
         <CardContent className="overflow-x-auto">
-          <form action="/admin/logs" method="get" className="mb-4 flex flex-wrap items-end gap-2">
+          <form action="/admin/revoke-activity" method="get" className="mb-4 flex flex-wrap items-end gap-2">
             <input type="hidden" name="page" value="1" />
             <label className="text-sm text-slate" htmlFor="pageSize">
               Rows per page
@@ -128,9 +134,9 @@ async function AdminLogsPage({ searchParams }: { searchParams?: Promise<SearchPa
         </CardContent>
       </Card>
 
-      <Pagination pathname="/admin/logs" page={clampedPage} pageSize={pageSize} totalItems={total} extraParams={{ pageSize }} />
+      <Pagination pathname="/admin/revoke-activity" page={clampedPage} pageSize={pageSize} totalItems={total} extraParams={{ pageSize }} />
     </div>
   );
 }
 
-export default withPageRequestTiming("/admin/logs", AdminLogsPage);
+export default withPageRequestTiming("/admin/revoke-activity", AdminRevokeActivityPage);

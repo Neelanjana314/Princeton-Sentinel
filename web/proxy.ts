@@ -7,6 +7,7 @@ import {
   PS_REQ_PATH_HEADER,
   PS_REQ_START_MS_HEADER,
 } from "@/app/lib/request-timing-headers";
+import { formatMiddlewareDoneLog } from "@/app/lib/request-timing";
 import {
   LAST_ACCOUNT_HINT_COOKIE,
   LAST_ACCOUNT_HINT_MAX_AGE_SECONDS,
@@ -30,7 +31,6 @@ const ADMIN_PREFIXES = [
   "/api/agents/access-blocks",
 ];
 const USER_PREFIXES = ["/dashboard", "/sites", "/api/graph", "/api/feature-flags"];
-const LOG_PREFIX = "[PERF] [WEBAPP]";
 
 type TimingMeta = {
   requestId: string;
@@ -80,10 +80,7 @@ function nextWithTiming(req: NextRequest, timing: TimingMeta) {
 }
 
 function logPerfDoneFromMiddleware(timing: TimingMeta, status: number) {
-  const totalMs = Math.max(0, Math.round(Date.now() - timing.startMs));
-  console.log(
-    `${LOG_PREFIX} done req_id=${timing.requestId} source=app method=${timing.method} path=${timing.path} status=${status} total_ms=${totalMs} db_ms=0 app_ms=${totalMs} render_ms=0`
-  );
+  console.log(formatMiddlewareDoneLog(timing, status));
 }
 
 function clearLastAccountHintCookie(response: NextResponse) {
@@ -109,6 +106,7 @@ function setLastAccountHintCookie(response: NextResponse, hint: string) {
 
 export async function proxy(req: NextRequest) {
   const { pathname, search } = req.nextUrl;
+  const timing = createTimingMeta(req);
 
   if (pathname.startsWith("/api/auth") || pathname.startsWith("/_next") || pathname === "/favicon.ico" || isPublicAsset(pathname)) {
     return applySecurityHeaders(NextResponse.next());
@@ -118,9 +116,8 @@ export async function proxy(req: NextRequest) {
   }
   // Agent access-check: uses its own API key auth, not Entra session
   if (pathname.startsWith("/api/agents/access-check")) {
-    return NextResponse.next();
+    return nextWithTiming(req, timing);
   }
-  const timing = createTimingMeta(req);
 
   if (pathname.startsWith("/signout")) {
     const response = nextWithTiming(req, timing);

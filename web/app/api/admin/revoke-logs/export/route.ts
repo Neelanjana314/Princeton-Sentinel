@@ -1,4 +1,11 @@
-import { getRevokeLogsBatchAfter, itemFallback, itemPath, requestedBy, type RevokeLogRow, type RevokeLogsCursor } from "@/app/admin/logs/revoke-log-queries";
+import {
+  getRevokeLogsBatchAfter,
+  itemFallback,
+  itemPath,
+  requestedBy,
+  type RevokeLogRow,
+  type RevokeLogsCursor,
+} from "@/app/admin/revoke-activity/revoke-activity-queries";
 import { requireAdmin } from "@/app/lib/auth";
 import { toCsvRow } from "@/app/lib/csv";
 import { withApiRequestTiming } from "@/app/lib/request-timing";

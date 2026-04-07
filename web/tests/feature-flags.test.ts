@@ -108,9 +108,9 @@ test("getFeatureDisabledApiResponse returns 404 when a feature is disabled", asy
 
 test("matchesFeaturePath recognizes all agents feature routes", () => {
   assert.equal(matchesFeaturePath("agents_dashboard", "/dashboard/agents"), true);
-  assert.equal(matchesFeaturePath("agents_dashboard", "/dashboard/copilot"), true);
   assert.equal(matchesFeaturePath("agents_dashboard", "/api/agents"), true);
-  assert.equal(matchesFeaturePath("agents_dashboard", "/api/copilot"), true);
+  assert.equal(matchesFeaturePath("agents_dashboard", "/dashboard/copilot"), false);
+  assert.equal(matchesFeaturePath("agents_dashboard", "/api/copilot"), false);
   assert.equal(matchesFeaturePath("agents_dashboard", "/dashboard/sites"), false);
 });
 

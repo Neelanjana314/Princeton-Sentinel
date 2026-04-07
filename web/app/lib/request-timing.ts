@@ -16,7 +16,11 @@ type RequestTimingContext = {
   method: string;
   path: string;
   startMs: number;
-  dbMs: number;
+  handlerStartMs: number;
+  dbWallMs: number;
+  dbQuerySumMs: number;
+  dbActiveCount: number;
+  dbActiveStartedAt: number | null;
   handlerMs: number;
   status: number;
   source: TimingSource;
@@ -82,22 +86,93 @@ function createContext(meta: RequestTimingMeta): RequestTimingContext {
     method: meta.method,
     path: meta.path,
     startMs: meta.startMs,
-    dbMs: 0,
+    handlerStartMs: meta.startMs,
+    dbWallMs: 0,
+    dbQuerySumMs: 0,
+    dbActiveCount: 0,
+    dbActiveStartedAt: null,
     handlerMs: 0,
     status: 200,
     source: meta.source,
   };
 }
 
-function logDone(context: RequestTimingContext) {
-  const totalMs = ms(nowMs() - context.startMs);
-  const dbMs = ms(context.dbMs);
-  const handlerMs = ms(context.handlerMs);
-  const appMs = ms(handlerMs - dbMs);
-  const renderMs = ms(totalMs - handlerMs);
+function finalizeDbWallMs(context: RequestTimingContext, endedAt: number) {
+  if (context.dbActiveCount > 0 && context.dbActiveStartedAt !== null) {
+    return context.dbWallMs + Math.max(0, endedAt - context.dbActiveStartedAt);
+  }
+  return context.dbWallMs;
+}
 
-  console.log(
-    `${LOG_PREFIX} done req_id=${context.requestId} source=${context.source} method=${context.method} path=${context.path} status=${context.status} total_ms=${totalMs} db_ms=${dbMs} app_ms=${appMs} render_ms=${renderMs}`
+function formatHandlerDoneLog(context: RequestTimingContext, endedAt: number) {
+  const requestMs = ms(endedAt - context.startMs);
+  const handlerMs = ms(context.handlerMs);
+  const preHandlerMs = ms(context.handlerStartMs - context.startMs);
+  const dbWallMs = ms(finalizeDbWallMs(context, endedAt));
+  const dbQuerySumMs = ms(context.dbQuerySumMs);
+  const handlerNonDbMs = ms(handlerMs - dbWallMs);
+
+  // Field meanings:
+  // - request_ms: complete request wall time from middleware entry to response log
+  // - pre_handler_ms: wall time before the wrapped handler began
+  // - handler_ms: wall time spent inside the wrapped page/API handler
+  // - db_wall_ms: merged wall-clock time with at least one DB query in flight
+  // - db_query_sum_ms: additive sum of individual query durations and may exceed wall time
+  // - handler_non_db_ms: handler wall time not spent waiting on Postgres
+  return (
+    `${LOG_PREFIX} done req_id=${context.requestId} source=${context.source} ` +
+    `method=${context.method} path=${context.path} status=${context.status} ` +
+    `request_ms=${requestMs} handler_ms=${handlerMs} pre_handler_ms=${preHandlerMs} ` +
+    `db_wall_ms=${dbWallMs} db_query_sum_ms=${dbQuerySumMs} handler_non_db_ms=${handlerNonDbMs}`
+  );
+}
+
+function logDone(context: RequestTimingContext) {
+  console.log(formatHandlerDoneLog(context, nowMs()));
+}
+
+export function beginDbTiming() {
+  const context = timingStorage.getStore();
+  const startedAt = nowMs();
+
+  if (context) {
+    if (context.dbActiveCount === 0) {
+      context.dbActiveStartedAt = startedAt;
+    }
+    context.dbActiveCount += 1;
+  }
+
+  return function endDbTiming() {
+    const endedAt = nowMs();
+    const durationMs = Math.max(0, endedAt - startedAt);
+    if (!context) return;
+
+    context.dbQuerySumMs += durationMs;
+    if (context.dbActiveCount > 0) {
+      context.dbActiveCount -= 1;
+    }
+    if (context.dbActiveCount === 0 && context.dbActiveStartedAt !== null) {
+      context.dbWallMs += Math.max(0, endedAt - context.dbActiveStartedAt);
+      context.dbActiveStartedAt = null;
+    }
+  };
+}
+
+export function formatMiddlewareDoneLog(
+  timing: {
+    requestId: string;
+    method: string;
+    path: string;
+    startMs: number;
+  },
+  status: number,
+  endedAt = nowMs(),
+) {
+  const requestMs = ms(endedAt - timing.startMs);
+  return (
+    `${LOG_PREFIX} done req_id=${timing.requestId} source=app ` +
+    `method=${timing.method} path=${timing.path} status=${status} ` +
+    `request_ms=${requestMs} middleware_ms=${requestMs} db_wall_ms=0 db_query_sum_ms=0`
   );
 }
 
@@ -163,12 +238,6 @@ async function readMetaForApi(routeLabel: string, req: unknown) {
   };
 }
 
-export function recordDbDuration(durationMs: number) {
-  const context = timingStorage.getStore();
-  if (!context) return;
-  context.dbMs += Math.max(0, durationMs);
-}
-
 export function withApiRequestTiming<T extends (...args: any[]) => any>(routeLabel: string, handler: T): T {
   const wrapped = (async (...args: Parameters<T>) => {
     const meta = await readMetaForApi(routeLabel, args[0]);
@@ -177,6 +246,7 @@ export function withApiRequestTiming<T extends (...args: any[]) => any>(routeLab
     }
     const context = createContext(meta);
     const handlerStart = nowMs();
+    context.handlerStartMs = handlerStart;
 
     return timingStorage.run(context, async () => {
       try {
@@ -205,6 +275,7 @@ export function withPageRequestTiming<TProps>(routeLabel: string, pageHandler: (
     }
     const context = createContext(meta);
     const handlerStart = nowMs();
+    context.handlerStartMs = handlerStart;
 
     return timingStorage.run(context, async () => {
       try {
@@ -222,3 +293,11 @@ export function withPageRequestTiming<TProps>(routeLabel: string, pageHandler: (
     });
   };
 }
+
+export const __requestTimingTestUtils = {
+  createContext,
+  formatHandlerDoneLog,
+  withTimingContext<T>(context: RequestTimingContext, fn: () => T) {
+    return timingStorage.run(context, fn);
+  },
+};

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireUser, isAdmin } from "@/app/lib/auth";
 import { callWorkerJson } from "@/app/lib/worker-api";
+import { withApiRequestTiming } from "@/app/lib/request-timing";
 
 export const dynamic = "force-dynamic";
 
@@ -11,7 +12,7 @@ const SELECT_COLS = "cr6c3_table11id,cr6c3_agentname,cr6c3_username,cr6c3_disabl
  * GET /api/agents/dataverse
  * Fetches the agent-user table from Dataverse. Admin-only.
  */
-export async function GET(req: NextRequest) {
+async function getHandler(req: NextRequest) {
   const { groups } = await requireUser();
   if (!isAdmin(groups)) {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
@@ -34,7 +35,7 @@ export async function GET(req: NextRequest) {
  * body: { row_id: string, data: Record<string, any> }
  * Patches a single Dataverse row. Admin-only.
  */
-export async function POST(req: NextRequest) {
+async function postHandler(req: NextRequest) {
   const { groups } = await requireUser();
   if (!isAdmin(groups)) {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
@@ -66,3 +67,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: message }, { status });
   }
 }
+
+export const GET = withApiRequestTiming("/api/agents/dataverse", getHandler);
+export const POST = withApiRequestTiming("/api/agents/dataverse", postHandler);

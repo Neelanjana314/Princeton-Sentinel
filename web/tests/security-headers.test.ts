@@ -13,6 +13,12 @@ import {
   STRICT_TRANSPORT_SECURITY_HEADER,
   X_FRAME_OPTIONS_HEADER,
 } from "../app/lib/security-headers";
+import {
+  PS_REQ_ID_HEADER,
+  PS_REQ_METHOD_HEADER,
+  PS_REQ_PATH_HEADER,
+  PS_REQ_START_MS_HEADER,
+} from "../app/lib/request-timing-headers";
 
 const originalResolveFilename = (Module as any)._resolveFilename;
 const testEnv = process.env as Record<string, string | undefined>;
@@ -154,6 +160,31 @@ test("proxy allows the post-auth bridge page without a session", async () => {
 
     assert.equal(response.status, 200);
     assertGlobalSecurityHeaders(response.headers);
+  } finally {
+    restoreWorkspaceAliasResolver();
+  }
+});
+
+test("proxy forwards timing headers for access-check without enforcing Entra auth", async () => {
+  installWorkspaceAliasResolver();
+  try {
+    process.env.NEXTAUTH_SECRET = "test-secret";
+    setMockToken(null);
+    const { proxy } = loadProxy();
+
+    const response = await proxy(new NextRequest("http://localhost/api/agents/access-check?user_id=abc&bot_id=xyz"));
+    const overrideHeaders = response.headers.get("x-middleware-override-headers") || "";
+
+    assert.equal(response.status, 200);
+    assertGlobalSecurityHeaders(response.headers);
+    assert.match(overrideHeaders, new RegExp(PS_REQ_ID_HEADER));
+    assert.match(overrideHeaders, new RegExp(PS_REQ_START_MS_HEADER));
+    assert.match(overrideHeaders, new RegExp(PS_REQ_METHOD_HEADER));
+    assert.match(overrideHeaders, new RegExp(PS_REQ_PATH_HEADER));
+    assert.ok(response.headers.get(`x-middleware-request-${PS_REQ_ID_HEADER}`));
+    assert.ok(response.headers.get(`x-middleware-request-${PS_REQ_START_MS_HEADER}`));
+    assert.equal(response.headers.get(`x-middleware-request-${PS_REQ_METHOD_HEADER}`), "GET");
+    assert.equal(response.headers.get(`x-middleware-request-${PS_REQ_PATH_HEADER}`), "/api/agents/access-check");
   } finally {
     restoreWorkspaceAliasResolver();
   }
