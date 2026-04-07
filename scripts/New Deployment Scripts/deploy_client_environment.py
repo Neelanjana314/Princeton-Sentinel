@@ -82,6 +82,7 @@ APP_INSIGHTS_PROACTIVE_DETECTIONS_API_VERSION = "2015-05-01"
 SMART_DETECTOR_ALERT_RULES_API_VERSION = "2021-04-01"
 POSTGRES_CREATE_RETRY_ATTEMPTS = 3
 POSTGRES_CREATE_RETRY_BACKOFF_SECONDS = 10
+REQUIRED_WEB_PUBLIC_ASSETS = ("pis-logo.png", "pits-white-logo.png")
 
 
 def phase_name(key: str) -> str:
@@ -143,6 +144,14 @@ def prompt_or_default(
     )
     section_data[key] = value
     return value
+
+
+def ensure_required_web_public_assets() -> None:
+    public_dir = ROOT / "web" / "public"
+    missing = [asset for asset in REQUIRED_WEB_PUBLIC_ASSETS if not (public_dir / asset).is_file()]
+    if missing:
+        formatted = ", ".join(str(public_dir / asset) for asset in missing)
+        raise DeploymentError(f"Missing required web public assets: {formatted}")
 
 
 def ensure_az_login(state: dict[str, Any], *, dry_run: bool, io: BaseIO) -> None:
@@ -1731,6 +1740,7 @@ def phase_capture_runtime(state: dict[str, Any], *, io: BaseIO) -> dict[str, Any
 def phase_build_web(state: dict[str, Any], *, dry_run: bool, io: BaseIO) -> dict[str, Any]:
     source = refresh_source_metadata(state, io=io)
     registry_server = state["azure"].get("acr_login_server") or f"{state['azure']['acr_name']}.azurecr.io"
+    ensure_required_web_public_assets()
     run_command(["npm", "ci"], cwd=ROOT / "web", dry_run=dry_run, io=io)
     run_command(["npm", "test"], cwd=ROOT / "web", env={"APP_VERSION": source["app_version"]}, dry_run=dry_run, io=io)
     run_command(["npm", "run", "build"], cwd=ROOT / "web", env={"APP_VERSION": source["app_version"]}, dry_run=dry_run, io=io)

@@ -146,6 +146,9 @@ class DeployClientEnvironmentTests(unittest.TestCase):
         )
         self.assertIn("pgcrypto", extensions)
 
+    def test_required_web_public_assets_exist(self):
+        deploy_client_environment.ensure_required_web_public_assets()
+
     def test_state_save_and_load_round_trip(self):
         source = {
             "app_version": "3.3.0",

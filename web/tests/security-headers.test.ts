@@ -140,7 +140,7 @@ test("proxy adds security headers to public asset bypass responses", async () =>
   try {
     const { proxy } = loadProxy();
 
-    const response = await proxy(new NextRequest("http://localhost/pis-logo.png"));
+    const response = await proxy(new NextRequest("http://localhost/pits-white-logo.png"));
 
     assert.equal(response.status, 200);
     assertGlobalSecurityHeaders(response.headers);

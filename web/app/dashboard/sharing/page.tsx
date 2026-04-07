@@ -24,6 +24,37 @@ function buildSearchFilter(search: string | null) {
   };
 }
 
+async function queryCurrentPageExternalPrincipalCounts(routeDriveIds: string[], internalDomainPatterns: string[]) {
+  if (routeDriveIds.length === 0) return [];
+  return query<any>(
+    `
+    WITH grants AS (
+      SELECT
+        g.drive_id,
+        LOWER(COALESCE(g.principal_email, g.principal_user_principal_name)) AS email
+      FROM msgraph_drive_item_permission_grants g
+      JOIN msgraph_drive_item_permissions p
+        ON p.drive_id = g.drive_id AND p.item_id = g.item_id AND p.permission_id = g.permission_id
+      WHERE g.deleted_at IS NULL
+        AND p.deleted_at IS NULL
+        AND g.drive_id = ANY($1::text[])
+        AND COALESCE(g.principal_email, g.principal_user_principal_name) IS NOT NULL
+    )
+    SELECT
+      drive_id,
+      COUNT(DISTINCT email) FILTER (WHERE email LIKE '%#ext#%')::int AS guest_users,
+      COUNT(DISTINCT email) FILTER (
+        WHERE email NOT LIKE '%#ext#%'
+          AND COALESCE(array_length($2::text[], 1), 0) > 0
+          AND NOT (split_part(email, '@', 2) LIKE ANY($2::text[]))
+      )::int AS external_users
+    FROM grants
+    GROUP BY drive_id
+    `,
+    [routeDriveIds, internalDomainPatterns]
+  );
+}
+
 export const dynamic = "force-dynamic";
 
 async function SharingPage({ searchParams }: { searchParams?: Promise<SearchParams> }) {
@@ -41,18 +72,19 @@ async function SharingPage({ searchParams }: { searchParams?: Promise<SearchPara
 
   const sortMap: Record<string, string> = {
     site: "i.title",
-    links: "COALESCE(ps.sharing_links, 0)",
-    anonymous: "COALESCE(ps.anonymous_links, 0)",
+    links: "COALESCE(s.sharing_links, 0)",
+    anonymous: "COALESCE(s.anonymous_links, 0)",
     guests: "COALESCE(ep.guest_users, 0)",
     external: "COALESCE(ep.external_users, 0)",
-    lastShare: "ps.last_shared_at",
+    lastShare: "s.last_shared_at",
   };
-  const sortColumn = sortMap[sort] || "COALESCE(ps.sharing_links, 0)";
+  const sortColumn = sortMap[sort] || "COALESCE(s.sharing_links, 0)";
+  const needsLivePrincipalSort = sort === "guests" || sort === "external";
   const { clause, params } = buildSearchFilter(search);
   const internalDomainParamIndex = params.length + 1;
   const limitParamIndex = params.length + 2;
   const offsetParamIndex = params.length + 3;
-  const [breakdownAllRows, topSites, countRows, siteRows] = await Promise.all([
+  const [breakdownAllRows, topSites, countRows, rawSiteRows] = await Promise.all([
     query<any>(
       `
       SELECT link_scope, link_type, count
@@ -71,57 +103,63 @@ async function SharingPage({ searchParams }: { searchParams?: Promise<SearchPara
     ),
     query<any>("SELECT COUNT(*)::int AS total FROM mv_msgraph_routable_site_drives i " + clause, params),
     query<any>(
-      `
-      WITH permission_summary AS (
-        SELECT
-          p.drive_id,
-          COUNT(*) FILTER (WHERE p.link_scope IS NOT NULL)::int AS sharing_links,
-          COUNT(*) FILTER (WHERE p.link_scope = 'anonymous')::int AS anonymous_links,
-          MAX(p.synced_at) AS last_shared_at
-        FROM msgraph_drive_item_permissions p
-        WHERE p.deleted_at IS NULL
-        GROUP BY p.drive_id
-      ),
-      grants AS (
-        SELECT
-          g.drive_id,
-          LOWER(COALESCE(g.principal_email, g.principal_user_principal_name)) AS email
-        FROM msgraph_drive_item_permission_grants g
-        JOIN msgraph_drive_item_permissions p
-          ON p.drive_id = g.drive_id AND p.item_id = g.item_id AND p.permission_id = g.permission_id
-        WHERE g.deleted_at IS NULL
-          AND p.deleted_at IS NULL
-          AND COALESCE(g.principal_email, g.principal_user_principal_name) IS NOT NULL
-      ),
-      external_principals AS (
-        SELECT
-          drive_id,
-          COUNT(DISTINCT email) FILTER (WHERE email LIKE '%#ext#%')::int AS guest_users,
-          COUNT(DISTINCT email) FILTER (
-            WHERE email NOT LIKE '%#ext#%'
-              AND COALESCE(array_length($${internalDomainParamIndex}::text[], 1), 0) > 0
-              AND NOT (split_part(email, '@', 2) LIKE ANY($${internalDomainParamIndex}::text[]))
-          )::int AS external_users
-        FROM grants
-        GROUP BY drive_id
-      )
-      SELECT
-        i.route_drive_id,
-        i.title,
-        i.web_url,
-        COALESCE(ps.sharing_links, 0) AS sharing_links,
-        COALESCE(ps.anonymous_links, 0) AS anonymous_links,
-        ps.last_shared_at,
-        COALESCE(ep.guest_users, 0) AS "guestUsers",
-        COALESCE(ep.external_users, 0) AS "externalUsers"
-      FROM mv_msgraph_routable_site_drives i
-      LEFT JOIN permission_summary ps ON ps.drive_id = i.route_drive_id
-      LEFT JOIN external_principals ep ON ep.drive_id = i.route_drive_id
-      ${clause}
-      ORDER BY ${sortColumn} ${dir.toUpperCase()} NULLS LAST
-      LIMIT $${limitParamIndex} OFFSET $${offsetParamIndex}
-      `,
-      [...params, internalDomainPatterns, pageSize, offset]
+      needsLivePrincipalSort
+        ? `
+          WITH grants AS (
+            SELECT
+              g.drive_id,
+              LOWER(COALESCE(g.principal_email, g.principal_user_principal_name)) AS email
+            FROM msgraph_drive_item_permission_grants g
+            JOIN msgraph_drive_item_permissions p
+              ON p.drive_id = g.drive_id AND p.item_id = g.item_id AND p.permission_id = g.permission_id
+            WHERE g.deleted_at IS NULL
+              AND p.deleted_at IS NULL
+              AND COALESCE(g.principal_email, g.principal_user_principal_name) IS NOT NULL
+          ),
+          external_principals AS (
+            SELECT
+              drive_id,
+              COUNT(DISTINCT email) FILTER (WHERE email LIKE '%#ext#%')::int AS guest_users,
+              COUNT(DISTINCT email) FILTER (
+                WHERE email NOT LIKE '%#ext#%'
+                  AND COALESCE(array_length($${internalDomainParamIndex}::text[], 1), 0) > 0
+                  AND NOT (split_part(email, '@', 2) LIKE ANY($${internalDomainParamIndex}::text[]))
+              )::int AS external_users
+            FROM grants
+            GROUP BY drive_id
+          )
+          SELECT
+            i.route_drive_id,
+            i.title,
+            i.web_url,
+            COALESCE(s.sharing_links, 0) AS sharing_links,
+            COALESCE(s.anonymous_links, 0) AS anonymous_links,
+            s.last_shared_at,
+            COALESCE(ep.guest_users, 0) AS "guestUsers",
+            COALESCE(ep.external_users, 0) AS "externalUsers"
+          FROM mv_msgraph_routable_site_drives i
+          LEFT JOIN mv_msgraph_site_sharing_summary s ON s.site_key = i.site_key
+          LEFT JOIN external_principals ep ON ep.drive_id = i.route_drive_id
+          ${clause}
+          ORDER BY ${sortColumn} ${dir.toUpperCase()} NULLS LAST
+          LIMIT $${limitParamIndex} OFFSET $${offsetParamIndex}
+          `
+        : `
+          SELECT
+            i.site_key,
+            i.route_drive_id,
+            i.title,
+            i.web_url,
+            COALESCE(s.sharing_links, 0) AS sharing_links,
+            COALESCE(s.anonymous_links, 0) AS anonymous_links,
+            s.last_shared_at
+          FROM mv_msgraph_routable_site_drives i
+          LEFT JOIN mv_msgraph_site_sharing_summary s ON s.site_key = i.site_key
+          ${clause}
+          ORDER BY ${sortColumn} ${dir.toUpperCase()} NULLS LAST
+          LIMIT $${params.length + 1} OFFSET $${params.length + 2}
+          `,
+      needsLivePrincipalSort ? [...params, internalDomainPatterns, pageSize, offset] : [...params, pageSize, offset]
     ),
   ]);
 
@@ -137,10 +175,27 @@ async function SharingPage({ searchParams }: { searchParams?: Promise<SearchPara
     value: row.count,
   }));
 
-  const siteRowsEnriched = siteRows.map((row: any) => ({
+  const principalCountsByDrive = needsLivePrincipalSort
+    ? new Map<string, { guest_users: number; external_users: number }>()
+    : new Map(
+        (
+          await queryCurrentPageExternalPrincipalCounts(
+            rawSiteRows.map((row: any) => row.route_drive_id).filter(Boolean),
+            internalDomainPatterns
+          )
+        ).map((row: any) => [
+          row.drive_id,
+          {
+            guest_users: Number(row.guest_users || 0),
+            external_users: Number(row.external_users || 0),
+          },
+        ])
+      );
+
+  const siteRowsEnriched = rawSiteRows.map((row: any) => ({
     ...row,
-    guestUsers: Number(row.guestUsers || 0),
-    externalUsers: Number(row.externalUsers || 0),
+    guestUsers: Number(row.guestUsers ?? principalCountsByDrive.get(row.route_drive_id)?.guest_users ?? 0),
+    externalUsers: Number(row.externalUsers ?? principalCountsByDrive.get(row.route_drive_id)?.external_users ?? 0),
   }));
 
   return (

@@ -1,5 +1,6 @@
-import Image from "next/image";
 import Link from "next/link";
+
+import BrandLogo from "@/components/brand-logo";
 
 type AuthShellProps = {
   title: string;
@@ -17,14 +18,7 @@ export default function AuthShell({ title, subtitle, support, children }: AuthSh
       <header className="ps-auth-header">
         <div className="mx-auto flex w-full max-w-7xl items-center px-4 py-3 lg:px-6">
           <Link href="/" className="flex items-center gap-3 text-sm font-semibold text-foreground">
-            <Image
-              src="/pis-logo.png"
-              alt="Princeton ITS logo"
-              width={LOGO_WIDTH}
-              height={LOGO_HEIGHT}
-              priority
-              className="h-8 w-auto"
-            />
+            <BrandLogo alt="Princeton ITS logo" width={LOGO_WIDTH} height={LOGO_HEIGHT} priority className="h-8 w-auto" />
             <span className="hidden whitespace-nowrap text-base sm:inline">Princeton Sentinel</span>
           </Link>
         </div>

@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import Image from "next/image";
 import { useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 
@@ -14,6 +13,7 @@ import {
 } from "@/app/lib/feature-flags-client";
 import type { FeatureFlags } from "@/app/lib/feature-flags-config";
 import { matchesFeaturePath } from "@/app/lib/feature-flags-config";
+import BrandLogo from "@/components/brand-logo";
 import UserMenu from "@/components/user-menu";
 import { FeatureFlagsProvider, useFeatureFlags } from "@/components/feature-flags-provider";
 import { Card, CardContent } from "@/components/ui/card";
@@ -94,7 +94,7 @@ function AppShellContent({ userLabel, canAdmin, children }: Omit<AppShellProps, 
         <div className="mx-auto flex w-full max-w-7xl flex-wrap items-center justify-between gap-4 px-4 py-3 lg:px-6">
           <div className="flex min-w-0 items-center gap-4">
             <Link href="/dashboard" className="flex items-center gap-3 text-sm font-semibold text-foreground">
-              <Image src="/pis-logo.png" alt="Princeton ITS logo" width={LOGO_WIDTH} height={LOGO_HEIGHT} priority className="h-16 w-auto" />
+              <BrandLogo alt="Princeton ITS logo" width={LOGO_WIDTH} height={LOGO_HEIGHT} priority className="h-16 w-auto" />
               <span className="hidden whitespace-nowrap text-base sm:inline">Princeton Sentinel</span>
             </Link>
             <nav className="hidden flex-wrap items-center gap-1 lg:flex">

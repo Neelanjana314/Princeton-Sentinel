@@ -15,7 +15,7 @@ permissions:
   contents: read
 
 env:
-  STAGING_VERSION: 3.4.2
+  STAGING_VERSION: 3.4.3
   AZ_RESOURCE_GROUP: ${{ vars.AZ_RESOURCE_GROUP }}
   AZ_ACR_NAME: ${{ vars.AZ_ACR_NAME }}
   AZ_WEB_APP_NAME: ${{ vars.AZ_WEB_APP_NAME }}
@@ -123,6 +123,13 @@ jobs:
           echo "STAGING_VERSION=${STAGING_VERSION}"
           echo "APP_VERSION=${APP_VERSION}"
           echo "IMAGE_TAG=${IMAGE_TAG}"
+
+      - name: Validate required web public assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f "web/public/pis-logo.png"
+          test -f "web/public/pits-white-logo.png"
 
       - name: Web checks (tests + build)
         shell: bash
