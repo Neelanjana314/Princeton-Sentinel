@@ -149,6 +149,7 @@ Defined in `003_materialized_views.sql`.
 - `mv_msgraph_site_inventory`
 - `mv_msgraph_routable_site_drives`
 - `mv_msgraph_site_sharing_summary`
+- `mv_msgraph_site_principal_identities`
 - `mv_msgraph_site_external_principals`
 - `mv_msgraph_link_breakdown`
 - `mv_msgraph_sites_created_month`

@@ -6,7 +6,9 @@ import { Button } from "@/components/ui/button";
 import { requireUser } from "@/app/lib/auth";
 import { query } from "@/app/lib/db";
 import { formatNumber } from "@/app/lib/format";
+import { getInternalDomainPatterns } from "@/app/lib/internalDomains";
 import { getPagination, getParam, getSortDirection, getWindowDays, SearchParams } from "@/app/lib/params";
+import { buildSitePrincipalCountsCte } from "@/app/lib/site-principal-counts";
 import { RiskTable } from "./risk-table";
 import { RiskSummaryBarChartClient, RiskSummaryPieChartClient } from "@/components/risk-summary-graphs-client";
 import PageHeader from "@/components/page-header";
@@ -27,6 +29,7 @@ async function RiskPage({ searchParams }: { searchParams?: Promise<SearchParams>
   await requireUser();
 
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
+  const internalDomainPatterns = getInternalDomainPatterns();
 
   const search = getParam(resolvedSearchParams, "q");
   const dormantDays = Number(getParam(resolvedSearchParams, "dormantDays") || process.env.DASHBOARD_DORMANT_LOOKBACK_DAYS || 90);
@@ -46,8 +49,12 @@ async function RiskPage({ searchParams }: { searchParams?: Promise<SearchParams>
 
   const { clause, params } = buildSearchFilter(search);
   const dormantParamIndex = params.length + 1;
+  const internalDomainParamIndex = params.length + 2;
   const flaggedBase = `
-    WITH base AS (
+    WITH
+    ${buildSitePrincipalCountsCte({ paramIndex: internalDomainParamIndex })}
+    ,
+    base AS (
       SELECT
         i.site_key,
         i.route_drive_id,
@@ -60,11 +67,11 @@ async function RiskPage({ searchParams }: { searchParams?: Promise<SearchParams>
         COALESCE(s.sharing_links, 0) AS sharing_links,
         COALESCE(s.anonymous_links, 0) AS anonymous_links,
         COALESCE(s.organization_links, 0) AS organization_links,
-        COALESCE(e.guest_users, 0) AS guest_users,
-        COALESCE(e.external_users, 0) AS external_users
+        COALESCE(pc.guest_users, 0) AS guest_users,
+        COALESCE(pc.external_users, 0) AS external_users
       FROM mv_msgraph_routable_site_drives i
       LEFT JOIN mv_msgraph_site_sharing_summary s ON s.site_key = i.site_key
-      LEFT JOIN mv_msgraph_site_external_principals e ON e.site_key = i.site_key
+      LEFT JOIN principal_counts pc ON pc.site_key = i.site_key
       ${clause}
     ),
     flagged AS (
@@ -89,7 +96,10 @@ async function RiskPage({ searchParams }: { searchParams?: Promise<SearchParams>
     )
   `;
   const graphFlaggedBase = `
-    WITH base AS (
+    WITH
+    ${buildSitePrincipalCountsCte({ paramIndex: 2 })}
+    ,
+    base AS (
       SELECT
         i.site_key,
         i.route_drive_id,
@@ -102,11 +112,11 @@ async function RiskPage({ searchParams }: { searchParams?: Promise<SearchParams>
         COALESCE(s.sharing_links, 0) AS sharing_links,
         COALESCE(s.anonymous_links, 0) AS anonymous_links,
         COALESCE(s.organization_links, 0) AS organization_links,
-        COALESCE(e.guest_users, 0) AS guest_users,
-        COALESCE(e.external_users, 0) AS external_users
+        COALESCE(pc.guest_users, 0) AS guest_users,
+        COALESCE(pc.external_users, 0) AS external_users
       FROM mv_msgraph_routable_site_drives i
       LEFT JOIN mv_msgraph_site_sharing_summary s ON s.site_key = i.site_key
-      LEFT JOIN mv_msgraph_site_external_principals e ON e.site_key = i.site_key
+      LEFT JOIN principal_counts pc ON pc.site_key = i.site_key
     ),
     flagged AS (
       SELECT
@@ -136,7 +146,7 @@ async function RiskPage({ searchParams }: { searchParams?: Promise<SearchParams>
     SELECT COUNT(*)::int AS total
     FROM filtered
     `,
-    [...params, dormantDays]
+    [...params, dormantDays, internalDomainPatterns]
   );
 
   const totalFlagged = countRows[0]?.total || 0;
@@ -169,9 +179,9 @@ async function RiskPage({ searchParams }: { searchParams?: Promise<SearchParams>
         flag_count
       FROM filtered
       ORDER BY ${sortColumn} ${dir.toUpperCase()} NULLS LAST
-      LIMIT $${params.length + 2} OFFSET $${params.length + 3}
+      LIMIT $${params.length + 3} OFFSET $${params.length + 4}
       `,
-      [...params, dormantDays, pageSize, offset]
+      [...params, dormantDays, internalDomainPatterns, pageSize, offset]
     ),
     query<any>(
       `
@@ -182,7 +192,7 @@ async function RiskPage({ searchParams }: { searchParams?: Promise<SearchParams>
       ORDER BY storage_used_bytes DESC NULLS LAST
       LIMIT 10
       `,
-      [dormantDays]
+      [dormantDays, internalDomainPatterns]
     ),
     query<any>(
       `
@@ -195,7 +205,7 @@ async function RiskPage({ searchParams }: { searchParams?: Promise<SearchParams>
         COUNT(*) FILTER (WHERE flag_count = 1 AND dormant)::int AS dormant
       FROM filtered
       `,
-      [dormantDays]
+      [dormantDays, internalDomainPatterns]
     ),
     query<any>(
       `
