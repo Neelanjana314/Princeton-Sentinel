@@ -7,9 +7,9 @@ import { cn } from "@/lib/utils";
 
 const tabs = [
   { label: "Analytics", href: "/admin/analytics" },
-  { label: "Jobs", href: "/admin/jobs" },
   { label: "Revoke Activity", href: "/admin/revoke-activity" },
   { label: "Agent Access", href: "/admin/agent-access-logs" },
+  { label: "Jobs", href: "/admin/jobs" },
   { label: "Runs", href: "/admin/runs" },
   { label: "Admin", href: "/admin" },
 ];
