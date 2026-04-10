@@ -14,6 +14,7 @@ import {
   sanitizeAccountHint,
 } from "@/app/lib/account-hint";
 import { getSessionCookieName, shouldUseSecureAuthCookies } from "@/app/lib/auth-cookies";
+import { attachCsrfCookie, CSRF_REQUEST_TOKEN_HEADER, ensureCsrfToken, getCsrfCookieName } from "@/app/lib/csrf";
 import { applySecurityHeaders } from "./app/lib/security-headers";
 
 const ADMIN_PREFIXES = [
@@ -64,19 +65,38 @@ function createTimingMeta(req: NextRequest): TimingMeta {
   };
 }
 
-function nextWithTiming(req: NextRequest, timing: TimingMeta) {
+function upsertCookieHeader(cookieHeader: string | null, name: string, value: string) {
+  const parts = (cookieHeader || "")
+    .split(";")
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .filter((part) => !part.startsWith(`${name}=`));
+
+  parts.push(`${name}=${value}`);
+  return parts.join("; ");
+}
+
+function nextWithTiming(req: NextRequest, timing: TimingMeta, csrfToken?: string, persistCsrfCookie = false) {
   const headers = new Headers(req.headers);
   headers.set(PS_REQ_ID_HEADER, timing.requestId);
   headers.set(PS_REQ_START_MS_HEADER, String(timing.startMs));
   headers.set(PS_REQ_METHOD_HEADER, timing.method);
   headers.set(PS_REQ_PATH_HEADER, timing.path);
-  return applySecurityHeaders(
+  if (csrfToken) {
+    headers.set(CSRF_REQUEST_TOKEN_HEADER, csrfToken);
+    headers.set("cookie", upsertCookieHeader(req.headers.get("cookie"), getCsrfCookieName(), csrfToken));
+  }
+  const response = applySecurityHeaders(
     NextResponse.next({
       request: {
         headers,
       },
     }),
   );
+  if (csrfToken && persistCsrfCookie) {
+    attachCsrfCookie(response, csrfToken);
+  }
+  return response;
 }
 
 function logPerfDoneFromMiddleware(timing: TimingMeta, status: number) {
@@ -169,6 +189,9 @@ export async function proxy(req: NextRequest) {
   const userGroup = process.env.USER_GROUP_ID;
   const isAdmin = adminGroup ? groups.includes(adminGroup) : false;
   const isUser = isAdmin || (userGroup ? groups.includes(userGroup) : false);
+  const existingCsrfToken = req.cookies.get(getCsrfCookieName())?.value;
+  const csrfToken = ensureCsrfToken(existingCsrfToken);
+  const persistCsrfCookie = csrfToken !== existingCsrfToken;
 
   if (ADMIN_PREFIXES.some((p) => pathname.startsWith(p))) {
     if (!isAdmin) {
@@ -196,7 +219,7 @@ export async function proxy(req: NextRequest) {
     }
   }
 
-  return nextWithTiming(req, timing);
+  return nextWithTiming(req, timing, csrfToken, persistCsrfCookie);
 }
 
 export const config = {

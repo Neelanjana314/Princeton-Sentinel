@@ -5,6 +5,7 @@ import { notFound } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { isAdmin, requireUser } from "@/app/lib/auth";
+import { getCsrfRenderToken } from "@/app/lib/csrf-server";
 import { query } from "@/app/lib/db";
 import { graphGet } from "@/app/lib/graph";
 import { formatBytes, safeDecode } from "@/app/lib/format";
@@ -87,6 +88,7 @@ export const dynamic = "force-dynamic";
 async function ItemDetailPage({ params }: { params: Promise<{ itemId: string }> }) {
   const { groups } = await requireUser();
   const admin = isAdmin(groups);
+  const csrfToken = await getCsrfRenderToken();
 
   const { itemId: encodedItemId } = await params;
   const key = splitItemKey(encodedItemId);
@@ -381,7 +383,7 @@ async function ItemDetailPage({ params }: { params: Promise<{ itemId: string }> 
             <CardDescription>People, groups, and apps with direct grants (excludes link principal)</CardDescription>
           </CardHeader>
           <CardContent className="overflow-x-auto">
-            <ItemPrincipalsTable principals={principalList} isAdmin={admin} driveId={driveId} itemId={itemId} />
+            <ItemPrincipalsTable principals={principalList} isAdmin={admin} driveId={driveId} itemId={itemId} csrfToken={csrfToken} />
           </CardContent>
         </Card>
       </div>
@@ -392,7 +394,7 @@ async function ItemDetailPage({ params }: { params: Promise<{ itemId: string }> 
           <CardDescription>Direct vs inherited entries, roles, and principal counts</CardDescription>
         </CardHeader>
         <CardContent className="overflow-x-auto">
-          <ItemPermissionsTable permissions={permissions} isAdmin={admin} driveId={driveId} itemId={itemId} />
+          <ItemPermissionsTable permissions={permissions} isAdmin={admin} driveId={driveId} itemId={itemId} csrfToken={csrfToken} />
         </CardContent>
       </Card>
     </main>

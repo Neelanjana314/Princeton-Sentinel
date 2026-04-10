@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireUser, isAdmin } from "@/app/lib/auth";
+import { validateCsrfRequest } from "@/app/lib/csrf";
 import { callWorkerJson } from "@/app/lib/worker-api";
 import { withApiRequestTiming } from "@/app/lib/request-timing";
 
@@ -47,6 +48,11 @@ async function postHandler(req: NextRequest) {
     body = await req.json();
   } catch {
     return NextResponse.json({ error: "invalid_json_body" }, { status: 400 });
+  }
+  const csrfValidation = validateCsrfRequest(req, body);
+  const csrfError = "error" in csrfValidation ? csrfValidation.error : null;
+  if (csrfError) {
+    return NextResponse.json({ error: csrfError }, { status: 403 });
   }
 
   const row_id = (body?.row_id || "").trim();

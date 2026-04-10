@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireAdmin } from "@/app/lib/auth";
+import { validateCsrfRequest } from "@/app/lib/csrf";
 import { LicenseFeatureError, requireLicenseFeature } from "@/app/lib/license";
 import { callWorker, isWorkerTimeoutError, parseWorkerErrorText } from "@/app/lib/worker-api";
 import { getNonEmptyString, parseRequestBody } from "@/app/lib/request-body";
@@ -36,6 +37,11 @@ const postHandler = async function POST(req: Request) {
 
   if (parsed.invalidJson) {
     return errorResponse(parsed.bodyType, target, "invalid_json_body", 400);
+  }
+  const csrfValidation = validateCsrfRequest(req, body);
+  const csrfError = "error" in csrfValidation ? csrfValidation.error : null;
+  if (csrfError) {
+    return errorResponse(parsed.bodyType, target, csrfError, 403);
   }
 
   const jobId = getNonEmptyString(body.job_id);

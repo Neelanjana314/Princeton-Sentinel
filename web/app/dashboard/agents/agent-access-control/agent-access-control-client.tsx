@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
+import { getCsrfFetchHeaders } from "@/app/lib/csrf-client";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
@@ -105,7 +106,7 @@ function deriveActiveBlocks(rows: DvRow[]): ActiveBlock[] {
     .sort((a, b) => Date.parse(b.blocked_at) - Date.parse(a.blocked_at));
 }
 
-export default function DataverseTableClient() {
+export default function DataverseTableClient({ csrfToken }: { csrfToken: string }) {
   const [rows, setRows] = React.useState<DvRow[]>([]);
   const [dvLoading, setDvLoading] = React.useState(true);
   const [dvError, setDvError] = React.useState<string | null>(null);
@@ -199,7 +200,7 @@ export default function DataverseTableClient() {
     try {
       const res = await fetch("/api/agents/access-blocks", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: getCsrfFetchHeaders({ "Content-Type": "application/json", "X-CSRF-Token": csrfToken }),
         body: JSON.stringify({
           action: "block",
           user_id: selectedUser,
@@ -248,7 +249,7 @@ export default function DataverseTableClient() {
     try {
       const res = await fetch("/api/agents/access-blocks", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: getCsrfFetchHeaders({ "Content-Type": "application/json", "X-CSRF-Token": csrfToken }),
         body: JSON.stringify({
           action: "unblock",
           user_id: block.user_id,

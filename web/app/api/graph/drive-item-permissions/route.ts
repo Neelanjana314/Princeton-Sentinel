@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireAdmin, requireUser } from "@/app/lib/auth";
+import { validateCsrfRequest } from "@/app/lib/csrf";
 import { LicenseFeatureError, requireLicenseFeature } from "@/app/lib/license";
 import { graphDelete, graphGet } from "@/app/lib/graph";
 import { withTransaction } from "@/app/lib/db";
@@ -92,6 +93,11 @@ const deleteHandler = async function DELETE(req: Request) {
   }
 
   const body: any = await parseBody(req);
+  const csrfValidation = validateCsrfRequest(req, body);
+  const csrfError = "error" in csrfValidation ? csrfValidation.error : null;
+  if (csrfError) {
+    return NextResponse.json({ error: csrfError }, { status: 403 });
+  }
   const { searchParams } = new URL(req.url);
   const driveId = body.driveId || searchParams.get("driveId");
   const itemId = body.itemId || searchParams.get("itemId");

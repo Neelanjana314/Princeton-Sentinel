@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { requireAdmin } from "@/app/lib/auth";
+import { validateCsrfRequest } from "@/app/lib/csrf";
 import { writeAuditEvent } from "@/app/lib/audit";
 import {
   activateLicenseArtifact,
@@ -29,6 +30,7 @@ async function readLicenseRequest(req: Request): Promise<{
   bodyType: "json" | "form" | "none";
   intent: string | null;
   text: string | null;
+  csrfToken: string | null;
   invalidJson: boolean;
 }> {
   const contentType = (req.headers.get("content-type") || "").toLowerCase();
@@ -38,25 +40,27 @@ async function readLicenseRequest(req: Request): Promise<{
       const body = await req.json();
       const text = typeof body?.licenseText === "string" ? body.licenseText : null;
       const intent = typeof body?.intent === "string" ? body.intent : null;
-      return { bodyType: "json", intent, text, invalidJson: false };
+      const csrfToken = typeof body?.csrf_token === "string" ? body.csrf_token : null;
+      return { bodyType: "json", intent, text, csrfToken, invalidJson: false };
     } catch {
-      return { bodyType: "json", intent: null, text: null, invalidJson: true };
+      return { bodyType: "json", intent: null, text: null, csrfToken: null, invalidJson: true };
     }
   }
 
   if (contentType.includes("form")) {
     const form = await req.formData();
     const intent = typeof form.get("intent") === "string" ? String(form.get("intent")) : null;
+    const csrfToken = typeof form.get("csrf_token") === "string" ? String(form.get("csrf_token")) : null;
     const file = form.get("license_file");
     if (file instanceof File) {
       const text = await file.text();
-      return { bodyType: "form", intent, text: text || null, invalidJson: false };
+      return { bodyType: "form", intent, text: text || null, csrfToken, invalidJson: false };
     }
     const text = typeof form.get("license_text") === "string" ? String(form.get("license_text")) : null;
-    return { bodyType: "form", intent, text, invalidJson: false };
+    return { bodyType: "form", intent, text, csrfToken, invalidJson: false };
   }
 
-  return { bodyType: "none", intent: null, text: null, invalidJson: false };
+  return { bodyType: "none", intent: null, text: null, csrfToken: null, invalidJson: false };
 }
 
 const getHandler = async function GET() {
@@ -76,6 +80,14 @@ const postHandler = async function POST(req: Request) {
   const payload = await readLicenseRequest(req);
   if (payload.invalidJson) {
     return jsonError("invalid_json_body", 400);
+  }
+  const csrfValidation = validateCsrfRequest(req, undefined, payload.csrfToken);
+  const csrfError = "error" in csrfValidation ? csrfValidation.error : null;
+  if (csrfError) {
+    if (payload.bodyType === "form") {
+      return redirectWithParams("/license", { error: csrfError });
+    }
+    return jsonError(csrfError, 403);
   }
   if (payload.intent === "clear") {
     await clearActiveLicenseArtifact();

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireAdmin } from "@/app/lib/auth";
+import { validateCsrfRequest } from "@/app/lib/csrf";
 import { query } from "@/app/lib/db";
 import { writeAuditEvent } from "@/app/lib/audit";
 import {
@@ -105,6 +106,11 @@ const postHandler = async function POST(req: Request) {
   }
 
   const body = parsed.body;
+  const csrfValidation = validateCsrfRequest(req, body);
+  const csrfError = "error" in csrfValidation ? csrfValidation.error : null;
+  if (csrfError) {
+    return NextResponse.json({ error: csrfError }, { status: 403 });
+  }
   const action = getNonEmptyString(body.action);
   const userId = getNonEmptyString(body.user_id);
   const botId = getNonEmptyString(body.bot_id);

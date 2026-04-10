@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import AdminJobControlNotice from "@/app/admin/AdminJobControlNotice";
 import type { AdminJobControlState } from "@/app/admin/job-control";
 import LocalDateTime from "@/components/local-date-time";
+import CsrfHiddenInput from "@/components/csrf-hidden-input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 import { deriveJobStatus, formatJobTypeLabel, getJobStatusBadgeClass, getJobStatusLabel } from "@/app/admin/job-status";
@@ -45,7 +46,13 @@ type OverviewResponse = {
 
 const REFRESH_INTERVAL_MS = 5000;
 
-export default function AdminOverviewClient({ initialAdminJobControl }: { initialAdminJobControl: AdminJobControlState }) {
+export default function AdminOverviewClient({
+  initialAdminJobControl,
+  csrfToken,
+}: {
+  initialAdminJobControl: AdminJobControlState;
+  csrfToken: string;
+}) {
   const [health, setHealth] = useState<WorkerHealth | null>(null);
   const [jobs, setJobs] = useState<WorkerJob[]>([]);
   const [adminJobControl, setAdminJobControl] = useState<AdminJobControlState>(initialAdminJobControl);
@@ -207,6 +214,7 @@ export default function AdminOverviewClient({ initialAdminJobControl }: { initia
                     <td className="py-3">
                       <div className="flex flex-wrap gap-2">
                         <form action="/api/worker/run-now" method="post">
+                          <CsrfHiddenInput token={csrfToken} />
                           <input type="hidden" name="job_id" value={row.job_id} />
                           <input type="hidden" name="redirect_to" value="/admin" />
                           <button
@@ -219,6 +227,7 @@ export default function AdminOverviewClient({ initialAdminJobControl }: { initia
                         </form>
                         {showPause ? (
                           <form action="/api/worker/pause" method="post">
+                            <CsrfHiddenInput token={csrfToken} />
                             <input type="hidden" name="job_id" value={row.job_id} />
                             <input type="hidden" name="redirect_to" value="/admin" />
                             <button
@@ -232,6 +241,7 @@ export default function AdminOverviewClient({ initialAdminJobControl }: { initia
                         ) : null}
                         {showResume ? (
                           <form action="/api/worker/resume" method="post">
+                            <CsrfHiddenInput token={csrfToken} />
                             <input type="hidden" name="job_id" value={row.job_id} />
                             <input type="hidden" name="redirect_to" value="/admin" />
                             <button

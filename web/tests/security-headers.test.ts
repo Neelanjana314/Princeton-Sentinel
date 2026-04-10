@@ -13,6 +13,7 @@ import {
   STRICT_TRANSPORT_SECURITY_HEADER,
   X_FRAME_OPTIONS_HEADER,
 } from "../app/lib/security-headers";
+import { createCsrfToken, getCsrfCookieName } from "../app/lib/csrf";
 
 const originalResolveFilename = (Module as any)._resolveFilename;
 const testEnv = process.env as Record<string, string | undefined>;
@@ -87,6 +88,52 @@ test("proxy adds security headers to authenticated pass-through responses", asyn
 
     assert.equal(response.status, 200);
     assertGlobalSecurityHeaders(response.headers);
+  } finally {
+    delete process.env.USER_GROUP_ID;
+    restoreWorkspaceAliasResolver();
+  }
+});
+
+test("proxy issues a csrf cookie for authenticated requests when missing", async () => {
+  installWorkspaceAliasResolver();
+  try {
+    process.env.NEXTAUTH_SECRET = "test-secret";
+    process.env.USER_GROUP_ID = "user-group";
+    setMockToken({ groups: ["user-group"] });
+    const { proxy } = loadProxy();
+
+    const response = await proxy(new NextRequest("http://localhost/dashboard"));
+    const setCookie = response.headers.get("set-cookie");
+
+    assert.equal(response.status, 200);
+    assert.ok(setCookie);
+    assert.match(setCookie!, new RegExp(`${getCsrfCookieName()}=`));
+    assert.match(setCookie!, /SameSite=Strict/i);
+  } finally {
+    delete process.env.USER_GROUP_ID;
+    restoreWorkspaceAliasResolver();
+  }
+});
+
+test("proxy reuses an existing valid csrf cookie without rewriting it", async () => {
+  installWorkspaceAliasResolver();
+  try {
+    process.env.NEXTAUTH_SECRET = "test-secret";
+    process.env.USER_GROUP_ID = "user-group";
+    setMockToken({ groups: ["user-group"] });
+    const { proxy } = loadProxy();
+    const csrfToken = createCsrfToken();
+
+    const response = await proxy(
+      new NextRequest("http://localhost/dashboard", {
+        headers: {
+          cookie: `${getCsrfCookieName()}=${csrfToken}`,
+        },
+      }),
+    );
+
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("set-cookie"), null);
   } finally {
     delete process.env.USER_GROUP_ID;
     restoreWorkspaceAliasResolver();

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { query } from "@/app/lib/db";
 import { requireAdmin } from "@/app/lib/auth";
+import { validateCsrfRequest } from "@/app/lib/csrf";
 import { writeAuditEvent } from "@/app/lib/audit";
 import { LicenseFeatureError, requireLicenseFeature } from "@/app/lib/license";
 import { isValidCronExpression } from "@/app/lib/cron";
@@ -49,6 +50,11 @@ const postHandler = async function POST(req: Request) {
     return NextResponse.json({ error: "invalid_json_body" }, { status: 400 });
   }
   const body: any = parsed.body;
+  const csrfValidation = validateCsrfRequest(req, body);
+  const csrfError = "error" in csrfValidation ? csrfValidation.error : null;
+  if (csrfError) {
+    return errorResponse(parsed.bodyType, csrfError, 403);
+  }
   const action = body.action || "create";
 
   try {

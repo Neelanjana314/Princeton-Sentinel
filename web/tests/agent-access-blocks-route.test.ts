@@ -53,6 +53,9 @@ test("block updates dataverse directly and preserves audit logging", async () =>
         session: { user: { oid: "oid-1", upn: "admin@example.com", name: "Admin" } },
       }),
     },
+    "@/app/lib/csrf": {
+      validateCsrfRequest: () => ({ ok: true, token: "csrf-token" }),
+    },
     "@/app/lib/db": {
       query: async (sql: string) => {
         if (sql.includes("INSERT INTO agent_access_revoke_log")) {
@@ -149,6 +152,9 @@ test("unblock requires an active disabled dataverse row and does not touch local
         session: { user: { oid: "oid-1", upn: "admin@example.com", name: "Admin" } },
       }),
     },
+    "@/app/lib/csrf": {
+      validateCsrfRequest: () => ({ ok: true, token: "csrf-token" }),
+    },
     "@/app/lib/db": {
       query: async (sql: string) => {
         if (sql.includes("copilot_access_blocks")) {
@@ -219,4 +225,52 @@ test("unblock requires an active disabled dataverse row and does not touch local
   assert.equal(res.status, 200);
   assert.equal(payload.status, "unblocked");
   assert.deepEqual(operations, ["worker", "dv-patch", "revoke-log", "audit"]);
+});
+
+test("route rejects missing csrf token before side effects", async () => {
+  const { POST } = loadRoute({
+    "@/app/lib/auth": {
+      requireAdmin: async () => ({
+        session: { user: { oid: "oid-1", upn: "admin@example.com", name: "Admin" } },
+      }),
+    },
+    "@/app/lib/csrf": {
+      validateCsrfRequest: () => ({ ok: false, error: "missing_csrf_token" }),
+    },
+    "@/app/lib/db": {
+      query: async () => {
+        throw new Error("db should not be called");
+      },
+    },
+    "@/app/lib/audit": {
+      writeAuditEvent: async () => {
+        throw new Error("audit should not be called");
+      },
+    },
+    "@/app/lib/worker-api": {
+      callWorker: async () => {
+        throw new Error("worker should not be called");
+      },
+      callWorkerJson: async () => {
+        throw new Error("worker json should not be called");
+      },
+      isWorkerTimeoutError: () => false,
+      parseWorkerErrorText: (text: string) => text,
+    },
+    "@/app/lib/request-body": {
+      parseRequestBody: async () => ({
+        invalidJson: false,
+        body: { action: "block" },
+      }),
+      getNonEmptyString,
+    },
+    "@/app/lib/request-timing": {
+      withApiRequestTiming: (_path: string, handler: Function) => handler,
+    },
+  });
+
+  const res = await POST(new Request("http://localhost/api/agents/access-blocks", { method: "POST" }));
+
+  assert.equal(res.status, 403);
+  assert.deepEqual(await res.json(), { error: "missing_csrf_token" });
 });

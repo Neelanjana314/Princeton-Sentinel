@@ -1,9 +1,11 @@
 import { withPageRequestTiming } from "@/app/lib/request-timing";
 import { requireAdmin, isAdmin } from "@/app/lib/auth";
+import { getCsrfRenderToken } from "@/app/lib/csrf-server";
 import { getFeatureFlagsPayload } from "@/app/lib/feature-flags";
 import { getCurrentLicenseSummary, type LicenseFeatureKey } from "@/app/lib/license";
 import { type SearchParams } from "@/app/lib/params";
 import AppShell from "@/components/app-shell";
+import CsrfHiddenInput from "@/components/csrf-hidden-input";
 import PageHeader from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -55,6 +57,7 @@ async function LicensePage({ searchParams }: LicensePageProps) {
     getFeatureFlagsPayload(),
     getCurrentLicenseSummary(),
   ]);
+  const csrfToken = await getCsrfRenderToken();
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
 
   const userLabel = session.user?.name ?? session.user?.email ?? "Signed in";
@@ -173,6 +176,7 @@ async function LicensePage({ searchParams }: LicensePageProps) {
               </CardHeader>
               <CardContent className="grid gap-4">
                 <form action="/api/license" method="post" encType="multipart/form-data" className="grid gap-3">
+                  <CsrfHiddenInput token={csrfToken} />
                   <label className="text-sm font-medium text-foreground" htmlFor="license_file">
                     License file
                   </label>
@@ -183,6 +187,7 @@ async function LicensePage({ searchParams }: LicensePageProps) {
                   <div className="mb-2 text-sm font-medium text-foreground">Demo Only</div>
                   <p className="mb-3 text-sm text-muted-foreground">Remove the current license without deleting stored artifact history.</p>
                   <form action="/api/license" method="post">
+                    <CsrfHiddenInput token={csrfToken} />
                     <input type="hidden" name="intent" value="clear" />
                     <Button type="submit" variant="outline">Remove Current License</Button>
                   </form>

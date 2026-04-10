@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { query } from "@/app/lib/db";
 import { requireAdmin } from "@/app/lib/auth";
+import { validateCsrfRequest } from "@/app/lib/csrf";
 import { writeAuditEvent } from "@/app/lib/audit";
 import { LicenseFeatureError, requireLicenseFeature } from "@/app/lib/license";
 import { getNonEmptyString, parseBooleanInput, parseRequestBody } from "@/app/lib/request-body";
@@ -26,6 +27,11 @@ const postHandler = async function POST(req: Request) {
     return NextResponse.json({ error: "invalid_json_body" }, { status: 400 });
   }
   const body: any = parsed.body;
+  const csrfValidation = validateCsrfRequest(req, body);
+  const csrfError = "error" in csrfValidation ? csrfValidation.error : null;
+  if (csrfError) {
+    return NextResponse.json({ error: csrfError }, { status: 403 });
+  }
   const action = body.action || "create";
 
   try {

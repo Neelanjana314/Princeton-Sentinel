@@ -4,6 +4,7 @@ import Link from "next/link";
 import * as React from "react";
 import { useRouter } from "next/navigation";
 
+import { getCsrfFetchHeaders } from "@/app/lib/csrf-client";
 import { SortableTable } from "@/components/sortable-table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -87,11 +88,16 @@ async function errorMessageFromResponse(res: Response): Promise<string> {
   return `Request failed with status ${res.status}`;
 }
 
-async function deletePermission(driveId: string, itemId: string, permissionId: string): Promise<DeletePermissionResult> {
+async function deletePermission(
+  driveId: string,
+  itemId: string,
+  permissionId: string,
+  csrfToken: string,
+): Promise<DeletePermissionResult> {
   try {
     const res = await fetch("/api/graph/drive-item-permissions", {
       method: "DELETE",
-      headers: { "Content-Type": "application/json" },
+      headers: getCsrfFetchHeaders({ "Content-Type": "application/json", "X-CSRF-Token": csrfToken }),
       body: JSON.stringify({ driveId, itemId, permissionId }),
     });
     if (res.ok) {
@@ -261,11 +267,13 @@ export function ItemPrincipalsTable({
   isAdmin,
   driveId,
   itemId,
+  csrfToken,
 }: {
   principals: PrincipalRow[];
   isAdmin: boolean;
   driveId: string;
   itemId: string;
+  csrfToken: string;
 }) {
   const router = useRouter();
   const [actionStatus, setActionStatus] = React.useState<Record<string, ActionStatus>>({});
@@ -346,7 +354,7 @@ export function ItemPrincipalsTable({
 
                 const targetPermissionIds = [...p.directPermissionIds];
                 const results = await Promise.all(
-                  targetPermissionIds.map((permissionId) => deletePermission(driveId, itemId, permissionId))
+                  targetPermissionIds.map((permissionId) => deletePermission(driveId, itemId, permissionId, csrfToken))
                 );
                 const successCount = results.filter((r) => r.ok).length;
                 const failures = results.filter((r) => !r.ok);
@@ -416,7 +424,7 @@ export function ItemPrincipalsTable({
     });
 
     return base;
-  }, [actionBusy, actionStatus, driveId, itemId, isAdmin, rowKey, router]);
+  }, [actionBusy, actionStatus, csrfToken, driveId, itemId, isAdmin, rowKey, router]);
 
   return <SortableTable items={principals} columns={columns} getRowKey={rowKey} emptyMessage="No principals found." />;
 }
@@ -426,11 +434,13 @@ export function ItemPermissionsTable({
   isAdmin,
   driveId,
   itemId,
+  csrfToken,
 }: {
   permissions: PermissionRow[];
   isAdmin: boolean;
   driveId: string;
   itemId: string;
+  csrfToken: string;
 }) {
   const router = useRouter();
   const [actionStatus, setActionStatus] = React.useState<Record<string, ActionStatus>>({});
@@ -520,7 +530,7 @@ export function ItemPermissionsTable({
                   return next;
                 });
 
-                const result = await deletePermission(driveId, itemId, p.permissionId);
+                const result = await deletePermission(driveId, itemId, p.permissionId, csrfToken);
                 if (!result.ok) {
                   setActionStatus((prev) => ({
                     ...prev,
@@ -576,7 +586,7 @@ export function ItemPermissionsTable({
     });
 
     return base;
-  }, [actionBusy, actionStatus, driveId, itemId, isAdmin, router]);
+  }, [actionBusy, actionStatus, csrfToken, driveId, itemId, isAdmin, router]);
 
   return <SortableTable items={permissions} columns={columns} getRowKey={(p) => p.permissionId} emptyMessage="No permissions found." />;
 }

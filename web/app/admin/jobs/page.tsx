@@ -1,15 +1,18 @@
 import AdminJobControlNotice from "@/app/admin/AdminJobControlNotice";
 import { getAdminJobControlState } from "@/app/admin/job-control";
+import { getCsrfRenderToken } from "@/app/lib/csrf-server";
 import { withPageRequestTiming } from "@/app/lib/request-timing";
 import { requireAdmin } from "@/app/lib/auth";
 import { query } from "@/app/lib/db";
 import { deriveJobStatus, formatJobTypeLabel, getJobStatusBadgeClass, getJobStatusLabel } from "@/app/admin/job-status";
+import CsrfHiddenInput from "@/components/csrf-hidden-input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import LocalDateTime from "@/components/local-date-time";
 
 async function JobsPage() {
   await requireAdmin();
   const adminJobControl = await getAdminJobControlState();
+  const csrfToken = await getCsrfRenderToken();
   const readOnly = !adminJobControl.jobControlEnabled;
 
   const rows = await query<any>(
@@ -83,6 +86,7 @@ async function JobsPage() {
                     <td className="py-3">
                       <div className="flex flex-wrap gap-2">
                         <form action="/api/worker/run-now" method="post">
+                          <CsrfHiddenInput token={csrfToken} />
                           <input type="hidden" name="job_id" value={row.job_id} />
                           <input type="hidden" name="redirect_to" value="/admin/jobs" />
                           <button
@@ -95,6 +99,7 @@ async function JobsPage() {
                         </form>
                         {showPause ? (
                           <form action="/api/worker/pause" method="post">
+                            <CsrfHiddenInput token={csrfToken} />
                             <input type="hidden" name="job_id" value={row.job_id} />
                             <input type="hidden" name="redirect_to" value="/admin/jobs" />
                             <button
@@ -108,6 +113,7 @@ async function JobsPage() {
                         ) : null}
                         {showResume ? (
                           <form action="/api/worker/resume" method="post">
+                            <CsrfHiddenInput token={csrfToken} />
                             <input type="hidden" name="job_id" value={row.job_id} />
                             <input type="hidden" name="redirect_to" value="/admin/jobs" />
                             <button
@@ -143,6 +149,7 @@ async function JobsPage() {
           </CardHeader>
           <CardContent>
             <form action="/api/schedules" method="post" className="grid gap-3">
+              <CsrfHiddenInput token={csrfToken} />
               <input type="hidden" name="action" value="create" />
               <label className="text-sm text-slate">Job</label>
               <select
@@ -192,6 +199,7 @@ async function JobsPage() {
           </CardHeader>
           <CardContent className="grid gap-4">
             <form action="/api/schedules" method="post" className="grid gap-3">
+              <CsrfHiddenInput token={csrfToken} />
               <input type="hidden" name="action" value="update" />
               <label className="text-sm text-slate">Schedule</label>
               <select
@@ -247,6 +255,7 @@ async function JobsPage() {
             </form>
 
             <form action="/api/schedules" method="post" className="grid gap-3">
+              <CsrfHiddenInput token={csrfToken} />
               <input type="hidden" name="action" value="delete" />
               <label className="text-sm text-slate">Delete Schedule</label>
               <select
