@@ -74,7 +74,7 @@ export default function RunsTable({ initialRuns }: { initialRuns: RunRow[] }) {
       </div>
 
       <div className="mt-4 overflow-x-auto">
-        <table className="w-full text-sm">
+        <table className="ps-table">
           <thead className="text-left text-muted-foreground">
             <tr>
               <th className="py-2">Job</th>

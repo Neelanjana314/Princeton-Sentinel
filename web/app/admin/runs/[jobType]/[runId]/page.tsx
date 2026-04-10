@@ -88,7 +88,7 @@ async function RunDetailPage({
           <CardDescription>{logs.length.toLocaleString()} logs (newest first)</CardDescription>
         </CardHeader>
         <CardContent className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="ps-table">
             <thead className="text-left text-muted-foreground">
               <tr>
                 <th className="py-2">Logged At</th>

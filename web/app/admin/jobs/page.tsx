@@ -52,7 +52,7 @@ async function JobsPage() {
           <CardTitle>Jobs</CardTitle>
         </CardHeader>
         <CardContent className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="ps-table">
             <thead className="text-left text-slate/70">
               <tr>
                 <th className="py-2">Job</th>

@@ -86,6 +86,25 @@ body {
     @apply rounded-lg border bg-card text-card-foreground;
     box-shadow: var(--shadow-elev);
   }
+  .ps-table {
+    @apply w-full caption-bottom border-separate border-spacing-0 text-sm;
+  }
+  .ps-table thead {
+    background-color: hsl(var(--surface-2));
+  }
+  .ps-table thead th {
+    @apply border-b border-border/80;
+  }
+  .ps-table tbody tr {
+    background-color: hsl(var(--surface-1));
+    transition: background-color 150ms ease, color 150ms ease;
+  }
+  .ps-table tbody tr:nth-child(even) {
+    background-color: hsl(var(--surface-2));
+  }
+  .ps-table tbody tr:hover {
+    background-color: hsl(var(--surface-3));
+  }
   .badge {
     @apply inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-semibold;
   }

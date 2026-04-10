@@ -134,7 +134,7 @@ export function EscalatedOutcomeCard({
           </h4>
         </div>
         <div className="max-h-64 overflow-y-auto pr-1">
-          <table className="w-full text-xs">
+          <table className="ps-table text-xs">
             <thead>
               <tr className="border-b text-left">
                 <th className="pb-1 pr-2 font-medium">Conversation ID</th>

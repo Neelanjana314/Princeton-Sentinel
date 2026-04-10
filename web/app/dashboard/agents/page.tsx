@@ -708,7 +708,7 @@ async function AgentsPage({ searchParams }: { searchParams?: Promise<SearchParam
             <p className="text-sm text-muted-foreground">No errors in this time range.</p>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="ps-table">
                 <thead>
                   <tr className="border-b text-left">
                     <th className="pb-2 pr-4 font-medium">Agent</th>
@@ -752,7 +752,7 @@ async function AgentsPage({ searchParams }: { searchParams?: Promise<SearchParam
             <p className="text-sm text-muted-foreground">No errors in this time range.</p>
           ) : (
             <div className="overflow-x-auto max-h-96 overflow-y-auto">
-              <table className="w-full text-sm">
+              <table className="ps-table">
                 <thead className="sticky top-0 bg-background">
                   <tr className="border-b text-left">
                     <th className="pb-2 pr-4 font-medium">Timestamp</th>

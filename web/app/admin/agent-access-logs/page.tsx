@@ -42,7 +42,7 @@ async function AgentAccessLogsPage({ searchParams }: { searchParams?: Promise<Se
             <Button type="submit" variant="outline">Apply</Button>
           </form>
 
-          <table className="w-full table-fixed text-sm">
+          <table className="ps-table table-fixed">
             <thead className="text-left text-slate/70">
               <tr>
                 <th className="w-[168px] py-2 pr-3">Timestamp</th>
