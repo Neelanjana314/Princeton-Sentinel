@@ -21,7 +21,6 @@ function readStoredTheme(): ThemeMode | null {
 
 function persistTheme(mode: ThemeMode) {
   document.documentElement.classList.toggle("dark", mode === "dark");
-  document.documentElement.style.colorScheme = mode;
 
   try {
     window.localStorage.setItem(THEME_STORAGE_KEY, mode);

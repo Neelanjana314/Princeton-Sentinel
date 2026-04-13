@@ -38,10 +38,18 @@ function Heatmap({ cells }: { cells: Array<{ dayOfWeek: number; hour: number; co
                     key={`${label}:${hour}`}
                     title={`${label} ${hour}:00 — ${count.toLocaleString()} writes`}
                     className="h-6 rounded border"
-                    style={{
-                      backgroundColor: count > 0 ? `hsl(var(--primary) / ${alpha})` : "transparent",
-                    }}
-                  />
+                  >
+                    <svg viewBox="0 0 24 24" className="block h-full w-full overflow-hidden rounded" aria-hidden="true">
+                      <rect
+                        x="0"
+                        y="0"
+                        width="24"
+                        height="24"
+                        rx="3"
+                        fill={count > 0 ? `hsl(var(--primary) / ${alpha})` : "transparent"}
+                      />
+                    </svg>
+                  </div>
                 );
               })}
             </div>

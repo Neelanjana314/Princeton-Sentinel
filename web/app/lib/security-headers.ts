@@ -23,6 +23,17 @@ function buildScriptSrcDirective(nonce: string | undefined, isDevelopment: boole
   return `script-src ${directives.join(" ")}`;
 }
 
+function buildStyleSrcDirective(nonce: string | undefined, isDevelopment: boolean) {
+  const directives = ["'self'"];
+  if (nonce) {
+    directives.push(`'nonce-${nonce}'`);
+  }
+  if (isDevelopment) {
+    directives.push("'unsafe-inline'");
+  }
+  return `style-src ${directives.join(" ")}`;
+}
+
 export function buildContentSecurityPolicy({
   nonce,
   isDevelopment = process.env.NODE_ENV === "development",
@@ -30,7 +41,7 @@ export function buildContentSecurityPolicy({
   return [
     "default-src 'self'",
     buildScriptSrcDirective(nonce, isDevelopment),
-    "style-src 'self' 'unsafe-inline'",
+    buildStyleSrcDirective(nonce, isDevelopment),
     "img-src 'self' data: blob:",
     "font-src 'self'",
     "object-src 'none'",

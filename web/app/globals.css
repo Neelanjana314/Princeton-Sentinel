@@ -153,6 +153,11 @@ body {
   .ps-auth-card {
     @apply w-full max-w-2xl rounded-xl border bg-card p-5 text-card-foreground shadow-sm;
   }
+  .ps-chart-legend-scroll canvas + div[role="legend"] {
+    overflow-x: auto;
+    max-width: 100%;
+    white-space: nowrap;
+  }
 }
 
 @layer utilities {

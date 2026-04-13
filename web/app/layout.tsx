@@ -24,7 +24,6 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         var mode = stored || cookieTheme || (prefersDark ? "dark" : "light");
         var root = document.documentElement;
         root.classList.toggle("dark", mode === "dark");
-        root.style.colorScheme = mode;
         localStorage.setItem("${THEME_STORAGE_KEY}", mode);
         document.cookie = "${THEME_COOKIE_NAME}=" + mode + "; Path=/; Max-Age=${THEME_COOKIE_MAX_AGE}; SameSite=Lax";
       } catch (e) {}
@@ -35,7 +34,6 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     <html
       lang="en"
       className={cookieTheme === "dark" ? "dark" : undefined}
-      style={{ colorScheme: cookieTheme ?? undefined }}
       suppressHydrationWarning
     >
       <head>

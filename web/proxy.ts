@@ -177,7 +177,7 @@ export async function proxy(req: NextRequest) {
   }
 
   if (pathname.startsWith("/signin/account") || pathname.startsWith("/auth/complete")) {
-    const response = nextWithTiming(req, timing, nonce);
+    const response = applySensitiveNoCacheHeaders(nextWithTiming(req, timing, nonce));
     if (req.nextUrl.searchParams.get("clearHint") === "1") {
       clearLastAccountHintCookie(response);
     }
@@ -246,5 +246,6 @@ export async function proxy(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
+  // Match every request so framework-served assets also receive shared security headers.
+  matcher: ["/:path*"],
 };

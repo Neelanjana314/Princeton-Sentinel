@@ -24,9 +24,10 @@ function parseIsoToTs(value: string | null | undefined): number | null {
 function Bar({ value, max }: { value: number; max: number }) {
   const pct = max <= 0 ? 0 : Math.min((value / max) * 100, 100);
   return (
-    <div className="h-2 w-full rounded bg-muted">
-      <div className="h-2 rounded bg-primary" style={{ width: `${pct}%` }} />
-    </div>
+    <svg viewBox="0 0 100 8" preserveAspectRatio="none" className="block h-2 w-full overflow-hidden rounded" aria-hidden="true">
+      <rect x="0" y="0" width="100" height="8" rx="4" fill="hsl(var(--muted))" />
+      <rect x="0" y="0" width={pct} height="8" rx="4" fill="hsl(var(--primary))" />
+    </svg>
   );
 }
 

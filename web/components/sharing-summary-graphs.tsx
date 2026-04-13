@@ -82,8 +82,13 @@ export function SharingSummaryPieChart({ data, href }: { data: { label: string; 
     },
   };
   return (
-    <div className={cn(href || data.some((d) => d.href) ? "cursor-pointer" : undefined)} style={{ width: "100%", minWidth: 0 }}>
-      <div style={{ width: "100%", minWidth: 0 }}>
+    <div
+      className={cn(
+        "ps-chart-legend-scroll w-full min-w-0",
+        href || data.some((d) => d.href) ? "cursor-pointer" : undefined
+      )}
+    >
+      <div className="w-full min-w-0">
         <Pie
           data={{
             labels: data.map((d) => d.label),
@@ -99,13 +104,6 @@ export function SharingSummaryPieChart({ data, href }: { data: { label: string; 
           height={260}
         />
       </div>
-      <style>{`
-        .chartjs-render-monitor + div[role="legend"] {
-          overflow-x: auto;
-          max-width: 100%;
-          white-space: nowrap;
-        }
-      `}</style>
     </div>
   );
 }
