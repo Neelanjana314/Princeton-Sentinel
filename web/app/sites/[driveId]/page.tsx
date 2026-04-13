@@ -10,6 +10,7 @@ import { formatBytes, formatIsoDate, formatIsoDateTime, formatNumber, safeDecode
 import { getParam, getWindowDays, SearchParams } from "@/app/lib/params";
 import { getInternalDomainPatterns } from "@/app/lib/internalDomains";
 
+import { HistoryBackButton } from "@/components/history-back-button";
 import { SiteActivityTrendTable, SiteTopUsersTable } from "./site-detail-tables";
 import { SiteAvailabilityNotice } from "./site-availability-notice";
 
@@ -254,9 +255,7 @@ async function DriveDetailPage({
           <p className="mt-2 text-xs uppercase tracking-[0.3em] text-muted-foreground">Cached (DB)</p>
         </div>
         <div className="flex flex-wrap items-center gap-3 text-sm">
-          <Link className="text-muted-foreground hover:underline" href="/dashboard/sites">
-            Back
-          </Link>
+          <HistoryBackButton fallbackHref="/dashboard/sites" className="text-muted-foreground hover:underline" />
           <Link className="text-muted-foreground hover:underline" href={`/sites/${encodeURIComponent(driveId)}/sharing`}>
             Sharing
           </Link>

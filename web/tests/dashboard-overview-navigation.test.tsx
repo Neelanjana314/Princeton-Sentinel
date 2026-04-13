@@ -8,6 +8,7 @@ const Module = require("node:module");
 const testGlobals = globalThis as typeof globalThis & {
   __psTmpAliasRegistered?: boolean;
   __psDashboardPageMocksRegistered?: boolean;
+  __psDashboardPageQueryImpl?: (sql: string) => Promise<any[]>;
 };
 
 if (!testGlobals.__psTmpAliasRegistered) {
@@ -31,7 +32,14 @@ if (!testGlobals.__psDashboardPageMocksRegistered) {
       };
     }
     if (request === "@/app/lib/db") {
-      return { query: async () => [] };
+      return {
+        query: async (sql: string) => {
+          if (testGlobals.__psDashboardPageQueryImpl) {
+            return testGlobals.__psDashboardPageQueryImpl(sql);
+          }
+          return [];
+        },
+      };
     }
     if (request === "@/app/lib/auth") {
       return { requireUser: async () => undefined };
@@ -58,4 +66,46 @@ test("overview metrics expose the expected dashboard destinations", () => {
   assert.match(markup, /Active Users/);
   assert.match(markup, /Groups/);
   assert.match(markup, /Drives/);
+});
+
+test("overview page excludes soft-deleted groups from the groups metric", async () => {
+  testGlobals.__psDashboardPageQueryImpl = async (sql: string) => {
+    if (sql.includes("FROM mv_msgraph_inventory_summary")) {
+      return [
+        {
+          sharepoint_sites_total: 10,
+          active_users_total: 20,
+          groups_total: 30,
+          groups_deleted: 7,
+        },
+      ];
+    }
+    if (sql.includes("FROM mv_msgraph_routable_site_drives")) {
+      return [{ total: 40 }];
+    }
+    if (sql.includes("FROM mv_msgraph_link_breakdown")) {
+      return [];
+    }
+    if (sql.includes("FROM mv_msgraph_drive_storage_totals")) {
+      return [{ storage_used: 0 }];
+    }
+    if (sql.includes("FROM mv_msgraph_drive_type_counts")) {
+      return [];
+    }
+    if (sql.includes("WITH labeled_drives AS")) {
+      return [];
+    }
+    return [];
+  };
+
+  try {
+    const DashboardPage = require("../app/dashboard/page").default as typeof import("../app/dashboard/page").default;
+    const markup = renderToStaticMarkup(await DashboardPage({}));
+
+    assert.match(markup, /Groups/);
+    assert.match(markup, />23</);
+    assert.doesNotMatch(markup, />30</);
+  } finally {
+    delete testGlobals.__psDashboardPageQueryImpl;
+  }
 });

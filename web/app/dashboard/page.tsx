@@ -125,7 +125,7 @@ async function DashboardPage() {
   const chartTotals = {
     sites: Number(inventory.sharepoint_sites_total || 0),
     users: Number(inventory.active_users_total || 0),
-    groups: Number(inventory.groups_total || 0),
+    groups: Math.max(0, Number(inventory.groups_total || 0) - Number(inventory.groups_deleted || 0)),
     drives: activitySiteCount,
   };
 

@@ -35,8 +35,10 @@ function AppShellContent({ userLabel, canAdmin, children }: Omit<AppShellProps, 
   const router = useRouter();
   const { flags } = useFeatureFlags();
   const [featureDisabledNotice, setFeatureDisabledNotice] = useState<string | null>(null);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const previousFlagsRef = useRef(flags);
   const redirectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mobileNavRef = useRef<HTMLDivElement | null>(null);
   const navItems = [
     { href: "/dashboard", label: "Overview", active: pathname === "/dashboard" },
     { href: "/dashboard/sites", label: "SharePoint Sites", active: pathname.startsWith("/dashboard/sites") || pathname.startsWith("/sites") },
@@ -88,6 +90,32 @@ function AppShellContent({ userLabel, canAdmin, children }: Omit<AppShellProps, 
     []
   );
 
+  useEffect(() => {
+    setMobileNavOpen(false);
+  }, [pathname]);
+
+  useEffect(() => {
+    function handleClick(event: MouseEvent) {
+      if (!mobileNavRef.current) return;
+      if (!mobileNavRef.current.contains(event.target as Node)) {
+        setMobileNavOpen(false);
+      }
+    }
+
+    function handleKey(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setMobileNavOpen(false);
+      }
+    }
+
+    document.addEventListener("mousedown", handleClick);
+    document.addEventListener("keydown", handleKey);
+    return () => {
+      document.removeEventListener("mousedown", handleClick);
+      document.removeEventListener("keydown", handleKey);
+    };
+  }, []);
+
   return (
     <div className="min-h-screen bg-background">
       <header className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/90">
@@ -116,23 +144,50 @@ function AppShellContent({ userLabel, canAdmin, children }: Omit<AppShellProps, 
           </div>
           <div className="flex items-center gap-2">
             <UserMenu userLabel={userLabel} canAdmin={canAdmin} />
+            <div className="relative lg:hidden" ref={mobileNavRef}>
+              <button
+                type="button"
+                className="flex h-9 w-9 items-center justify-center rounded-md border border-input bg-background hover:bg-accent"
+                onClick={() => setMobileNavOpen((prev) => !prev)}
+                aria-haspopup="menu"
+                aria-expanded={mobileNavOpen}
+                aria-controls="mobile-nav-menu"
+              >
+                <span className="sr-only">Toggle navigation menu</span>
+                <span className="flex flex-col gap-1">
+                  <span className="block h-0.5 w-4 rounded-full bg-foreground" />
+                  <span className="block h-0.5 w-4 rounded-full bg-foreground" />
+                  <span className="block h-0.5 w-4 rounded-full bg-foreground" />
+                </span>
+              </button>
+              {mobileNavOpen ? (
+                <div
+                  id="mobile-nav-menu"
+                  role="menu"
+                  className="absolute right-0 z-50 mt-2 w-56 rounded-md border bg-card p-1 text-sm shadow-md"
+                >
+                  <nav className="flex flex-col gap-1">
+                    {navItems.map((item) => (
+                      <Link
+                        key={item.href}
+                        href={item.href}
+                        role="menuitem"
+                        className={cn(
+                          "block rounded px-3 py-2 text-sm font-medium",
+                          item.active
+                            ? "border border-primary/45 bg-primary/15 text-foreground"
+                            : "text-muted-foreground hover:bg-accent hover:text-foreground"
+                        )}
+                        onClick={() => setMobileNavOpen(false)}
+                      >
+                        {item.label}
+                      </Link>
+                    ))}
+                  </nav>
+                </div>
+              ) : null}
+            </div>
           </div>
-        </div>
-        <div className="mx-auto flex w-full max-w-7xl gap-1 overflow-x-auto px-4 pb-2 lg:hidden">
-          {navItems.map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={cn(
-                "whitespace-nowrap rounded-md border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide",
-                item.active
-                  ? "border-primary/45 bg-primary/15 text-foreground"
-                  : "border-transparent text-muted-foreground"
-              )}
-            >
-              {item.label}
-            </Link>
-          ))}
         </div>
       </header>
       <div className="mx-auto w-full max-w-7xl px-4 py-5 lg:px-6">
