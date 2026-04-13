@@ -8,6 +8,7 @@ import {
   PS_REQ_PATH_HEADER,
   PS_REQ_START_MS_HEADER,
 } from "@/app/lib/request-timing-headers";
+import { applySensitiveNoCacheHeaders } from "@/app/lib/security-headers";
 
 type TimingSource = "api" | "page";
 
@@ -251,10 +252,11 @@ export function withApiRequestTiming<T extends (...args: any[]) => any>(routeLab
     return timingStorage.run(context, async () => {
       try {
         const result = await handler(...args);
+        const finalResult = result instanceof Response ? applySensitiveNoCacheHeaders(result) : result;
         context.handlerMs = nowMs() - handlerStart;
-        context.status = result instanceof Response ? result.status : 200;
+        context.status = finalResult instanceof Response ? finalResult.status : 200;
         logDone(context);
-        return result;
+        return finalResult;
       } catch (err) {
         context.handlerMs = nowMs() - handlerStart;
         context.status = statusFromError(err);

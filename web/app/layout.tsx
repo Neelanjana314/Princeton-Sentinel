@@ -1,6 +1,7 @@
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 
 import "./globals.css";
+import { NONCE_HEADER } from "@/app/lib/security-headers";
 import { normalizeTheme, THEME_COOKIE_MAX_AGE, THEME_COOKIE_NAME, THEME_STORAGE_KEY } from "@/app/lib/theme";
 
 export const metadata = {
@@ -10,7 +11,9 @@ export const metadata = {
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const cookieStore = await cookies();
+  const requestHeaders = await headers();
   const cookieTheme = normalizeTheme(cookieStore.get(THEME_COOKIE_NAME)?.value);
+  const nonce = requestHeaders.get(NONCE_HEADER) ?? undefined;
   const themeInitScript = `
     (function() {
       try {
@@ -36,7 +39,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       suppressHydrationWarning
     >
       <head>
-        <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
+        <script nonce={nonce} dangerouslySetInnerHTML={{ __html: themeInitScript }} />
       </head>
       <body>{children}</body>
     </html>

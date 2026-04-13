@@ -20,6 +20,10 @@ if (!testGlobals.__psTmpAliasRegistered) {
 
 const { GET } = require("../app/api/worker/overview/route") as typeof import("../app/api/worker/overview/route");
 const { setRequireAdminForTests } = require("../app/lib/auth") as typeof import("../app/lib/auth");
+const {
+  CACHE_CONTROL_HEADER,
+  PRAGMA_HEADER,
+} = require("../app/lib/security-headers") as typeof import("../app/lib/security-headers");
 const { LICENSE_FEATURE_DEFAULTS, setLicenseSummaryForTests } = require("../app/lib/license") as typeof import("../app/lib/license");
 const { setCallWorkerForTests } = require("../app/lib/worker-api") as typeof import("../app/lib/worker-api");
 
@@ -67,6 +71,8 @@ test("worker overview route returns admin job control payload when job control i
     const payload = await res.json();
 
     assert.equal(res.status, 200);
+    assert.equal(res.headers.get(CACHE_CONTROL_HEADER), "no-store, no-cache, must-revalidate");
+    assert.equal(res.headers.get(PRAGMA_HEADER), "no-cache");
     assert.deepEqual(payload.adminJobControl, {
       jobControlEnabled: false,
       reason: "license_feature_job_control_disabled",

@@ -15,7 +15,13 @@ import {
 } from "@/app/lib/account-hint";
 import { getSessionCookieName, shouldUseSecureAuthCookies } from "@/app/lib/auth-cookies";
 import { attachCsrfCookie, CSRF_REQUEST_TOKEN_HEADER, ensureCsrfToken, getCsrfCookieName } from "@/app/lib/csrf";
-import { applySecurityHeaders } from "./app/lib/security-headers";
+import {
+  applySecurityHeaders,
+  applySensitiveNoCacheHeaders,
+  buildContentSecurityPolicy,
+  CONTENT_SECURITY_POLICY_HEADER,
+  NONCE_HEADER,
+} from "./app/lib/security-headers";
 
 const ADMIN_PREFIXES = [
   "/admin",
@@ -48,12 +54,20 @@ function isPublicAsset(pathname: string) {
   return /\.[^/]+$/.test(pathname);
 }
 
-function forbiddenRedirect(req: NextRequest) {
+function createContentSecurityPolicyNonce() {
+  const nonceSource = crypto.randomUUID();
+  if (typeof btoa === "function") {
+    return btoa(nonceSource);
+  }
+  return Buffer.from(nonceSource).toString("base64");
+}
+
+function forbiddenRedirect(req: NextRequest, nonce: string) {
   const url = req.nextUrl.clone();
   url.pathname = "/forbidden";
   url.search = "";
   url.searchParams.set("callbackUrl", req.nextUrl.pathname + req.nextUrl.search);
-  return applySecurityHeaders(NextResponse.redirect(url));
+  return applySecurityHeaders(NextResponse.redirect(url), nonce);
 }
 
 function createTimingMeta(req: NextRequest): TimingMeta {
@@ -76,12 +90,14 @@ function upsertCookieHeader(cookieHeader: string | null, name: string, value: st
   return parts.join("; ");
 }
 
-function nextWithTiming(req: NextRequest, timing: TimingMeta, csrfToken?: string, persistCsrfCookie = false) {
+function nextWithTiming(req: NextRequest, timing: TimingMeta, nonce: string, csrfToken?: string, persistCsrfCookie = false) {
   const headers = new Headers(req.headers);
   headers.set(PS_REQ_ID_HEADER, timing.requestId);
   headers.set(PS_REQ_START_MS_HEADER, String(timing.startMs));
   headers.set(PS_REQ_METHOD_HEADER, timing.method);
   headers.set(PS_REQ_PATH_HEADER, timing.path);
+  headers.set(NONCE_HEADER, nonce);
+  headers.set(CONTENT_SECURITY_POLICY_HEADER, buildContentSecurityPolicy({ nonce }));
   if (csrfToken) {
     headers.set(CSRF_REQUEST_TOKEN_HEADER, csrfToken);
     headers.set("cookie", upsertCookieHeader(req.headers.get("cookie"), getCsrfCookieName(), csrfToken));
@@ -92,11 +108,16 @@ function nextWithTiming(req: NextRequest, timing: TimingMeta, csrfToken?: string
         headers,
       },
     }),
+    nonce,
   );
   if (csrfToken && persistCsrfCookie) {
     attachCsrfCookie(response, csrfToken);
   }
   return response;
+}
+
+function applyProtectedResponseHeaders<T extends NextResponse>(response: T, nonce: string): T {
+  return applySensitiveNoCacheHeaders(applySecurityHeaders(response, nonce));
 }
 
 function logPerfDoneFromMiddleware(timing: TimingMeta, status: number) {
@@ -127,15 +148,17 @@ function setLastAccountHintCookie(response: NextResponse, hint: string) {
 export async function proxy(req: NextRequest) {
   const { pathname, search } = req.nextUrl;
   const timing = createTimingMeta(req);
+  const nonce = createContentSecurityPolicyNonce();
 
   if (pathname.startsWith("/api/auth") || pathname.startsWith("/_next") || pathname === "/favicon.ico" || isPublicAsset(pathname)) {
-    return applySecurityHeaders(NextResponse.next());
+    const response = applySecurityHeaders(NextResponse.next());
+    return pathname.startsWith("/api/auth") ? applySensitiveNoCacheHeaders(response) : response;
   }
   if (pathname.startsWith("/api/internal/worker-heartbeat")) {
-    return applySecurityHeaders(NextResponse.next());
+    return applyProtectedResponseHeaders(NextResponse.next(), nonce);
   }
   if (pathname.startsWith("/signout")) {
-    const response = nextWithTiming(req, timing);
+    const response = applySensitiveNoCacheHeaders(nextWithTiming(req, timing, nonce));
     const token = await getToken({
       req,
       secret: process.env.NEXTAUTH_SECRET,
@@ -154,7 +177,7 @@ export async function proxy(req: NextRequest) {
   }
 
   if (pathname.startsWith("/signin/account") || pathname.startsWith("/auth/complete")) {
-    const response = nextWithTiming(req, timing);
+    const response = nextWithTiming(req, timing, nonce);
     if (req.nextUrl.searchParams.get("clearHint") === "1") {
       clearLastAccountHintCookie(response);
     }
@@ -162,7 +185,7 @@ export async function proxy(req: NextRequest) {
   }
 
   if (pathname.startsWith("/signin") || pathname.startsWith("/forbidden") || pathname.startsWith("/403")) {
-    return nextWithTiming(req, timing);
+    return nextWithTiming(req, timing, nonce);
   }
 
   const token = await getToken({
@@ -173,13 +196,13 @@ export async function proxy(req: NextRequest) {
   });
   if (!token) {
     if (isApiRequest(pathname)) {
-      const response = applySecurityHeaders(NextResponse.json({ error: "unauthorized" }, { status: 401 }));
+      const response = applyProtectedResponseHeaders(NextResponse.json({ error: "unauthorized" }, { status: 401 }), nonce);
       logPerfDoneFromMiddleware(timing, response.status);
       return response;
     }
     const signInUrl = new URL("/signin/account", req.nextUrl.origin);
     signInUrl.searchParams.set("callbackUrl", pathname + search);
-    const response = applySecurityHeaders(NextResponse.redirect(signInUrl));
+    const response = applyProtectedResponseHeaders(NextResponse.redirect(signInUrl), nonce);
     logPerfDoneFromMiddleware(timing, response.status);
     return response;
   }
@@ -196,11 +219,11 @@ export async function proxy(req: NextRequest) {
   if (ADMIN_PREFIXES.some((p) => pathname.startsWith(p))) {
     if (!isAdmin) {
       if (isApiRequest(pathname)) {
-        const response = applySecurityHeaders(NextResponse.json({ error: "forbidden" }, { status: 403 }));
+        const response = applyProtectedResponseHeaders(NextResponse.json({ error: "forbidden" }, { status: 403 }), nonce);
         logPerfDoneFromMiddleware(timing, response.status);
         return response;
       }
-      const response = forbiddenRedirect(req);
+      const response = applySensitiveNoCacheHeaders(forbiddenRedirect(req, nonce));
       logPerfDoneFromMiddleware(timing, response.status);
       return response;
     }
@@ -209,17 +232,17 @@ export async function proxy(req: NextRequest) {
   if (USER_PREFIXES.some((p) => pathname.startsWith(p))) {
     if (!isUser) {
       if (isApiRequest(pathname)) {
-        const response = applySecurityHeaders(NextResponse.json({ error: "forbidden" }, { status: 403 }));
+        const response = applyProtectedResponseHeaders(NextResponse.json({ error: "forbidden" }, { status: 403 }), nonce);
         logPerfDoneFromMiddleware(timing, response.status);
         return response;
       }
-      const response = forbiddenRedirect(req);
+      const response = applySensitiveNoCacheHeaders(forbiddenRedirect(req, nonce));
       logPerfDoneFromMiddleware(timing, response.status);
       return response;
     }
   }
 
-  return nextWithTiming(req, timing, csrfToken, persistCsrfCookie);
+  return applyProtectedResponseHeaders(nextWithTiming(req, timing, nonce, csrfToken, persistCsrfCookie), nonce);
 }
 
 export const config = {
