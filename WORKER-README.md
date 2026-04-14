@@ -1,170 +1,111 @@
 # Worker Component (`/worker`)
 
-## Purpose
-The worker is a Python service that combines:
+The worker is the execution plane of Princeton Sentinel. It is a Python 3.11 service that combines:
 
-- Internal Flask API for job control/status
-- In-process scheduler loop (no external cron)
-- Microsoft Graph ingestion pipeline (`graph_ingest`)
-- Write path into Postgres (latest-state inventory + permission model)
-- Heartbeat emitter to the web app
+- an internal Flask API
+- an in-process scheduler
+- Microsoft Graph ingestion
+- materialized-view refresh execution
+- Copilot telemetry ingestion from Application Insights
+- Dataverse proxy helpers for the agents area
+- Conditional Access-backed control actions
+- heartbeat reporting back to the web app
 
-The worker is the system's ingestion engine and async execution plane.
-
----
-
-## Runtime and Build
+## Runtime And Build
 
 - Python `3.11`
-- Flask `3.0.2`
-- `psycopg2-binary` for DB access
-- `msal` for Graph app-only token acquisition
-- `requests` for HTTP
-- `croniter` for schedule calculation
+- Flask `3.1.3`
+- Gunicorn `22.0.0`
+- `psycopg2-binary`
+- `requests`
+- `msal`
+- `croniter`
+- `PyJWT`
+- `cryptography`
 
-Container runtime:
+Container/runtime files:
 
-- Dockerfile: `/Users/garrick-mac/Documents/GitHub/Princeton-Sentinel/worker/Dockerfile`
-- Exposed port: `5000`
-- Startup command: `python -m app.main`
+- Dockerfile: [worker/Dockerfile](/Users/garrick-mac/Documents/GitHub/Princeton-Sentinel/worker/Dockerfile)
+- entry module: [worker/app/main.py](/Users/garrick-mac/Documents/GitHub/Princeton-Sentinel/worker/app/main.py)
 
-Startup side effects from `app.main`:
+Container startup command:
 
-1. Create Flask app
-2. Start scheduler daemon thread
-3. Start heartbeat daemon thread
+```bash
+python -m gunicorn --bind 0.0.0.0:5000 --workers 1 --threads 4 app.main:app
+```
 
----
+## Boot Flow
 
-## Internal API (`app/api.py`)
+`app.main`:
 
-### `GET /health`
+1. creates the Flask app
+2. starts the scheduler thread
+3. starts the heartbeat thread
 
-Returns:
+Background threads can be disabled with `WORKER_ENABLE_BACKGROUND_THREADS=false`, which is used by some packaging/test workflows.
 
-- DB connectivity status (`SELECT 1`)
-- scheduler status (`running`, `last_tick`, `last_error`)
-- heartbeat status (attempt/success/failure counters)
-- top-level `ok = db_ok && heartbeat_healthy`
+## Internal API
 
-### `GET /jobs/status`
+The Flask routes live in [worker/app/api.py](/Users/garrick-mac/Documents/GitHub/Princeton-Sentinel/worker/app/api.py). All endpoints require `X-Worker-Internal-Token` unless noted otherwise.
 
-Joins:
+### Health and job control
 
-- `jobs`
-- `job_schedules`
-- `mv_latest_job_runs`
+- `GET /health`
+  - DB connectivity
+  - scheduler status
+  - heartbeat status
+  - effective license summary
+- `GET /jobs/status`
+  - current jobs, schedules, latest run state, and effective license summary
+- `POST /jobs/run-now`
+- `POST /jobs/pause`
+- `POST /jobs/resume`
 
-Provides consolidated admin/control-plane status.
+Job-control endpoints are license-gated. `run-now` also checks the job-type-specific license feature where applicable.
 
-### `POST /jobs/run-now`
+### Conditional Access and agent control
 
-- Requires `job_id` in body
-- Looks up job
-- Logs `job_run_requested` audit event
-- Spawns background thread that calls `run_job_once(job, actor)`
-- Returns `202 queued`
+- `POST /conditional-access/block`
+- `POST /conditional-access/unblock`
+- `POST /conditional-access/disable-agent`
+- `POST /conditional-access/enable-agent`
 
-### `POST /jobs/pause` and `POST /jobs/resume`
+These endpoints support the admin agent access workflows exposed through the web app.
 
-- `pause` updates `job_schedules.enabled=false` and clears `job_schedules.next_run_at`
-- `resume` updates `job_schedules.enabled=true`, clears `job_schedules.next_run_at`, and restores `jobs.enabled=true`
-- Writes audit events (`job_paused` / `job_resumed`)
+### Dataverse proxy helpers
 
-### Auth note
+- `GET /dataverse/table`
+- `POST /dataverse/patch`
 
-Control endpoints are designed for internal use, are invoked via the web app proxy layer, and require `X-Worker-Internal-Token` / `WORKER_INTERNAL_API_TOKEN`.
+The web app uses these routes to query and patch Dataverse-backed agent access data without exposing Dataverse credentials to the browser.
 
----
+## Scheduler
 
-## Scheduler Engine (`app/scheduler.py`)
+The scheduler implementation lives in [worker/app/scheduler.py](/Users/garrick-mac/Documents/GitHub/Princeton-Sentinel/worker/app/scheduler.py).
 
-## Poll loop
+Current behavior:
 
-- Interval: `SCHEDULER_POLL_SECONDS` (default 30)
-- Each tick:
-  1. initialize one schedule with `next_run_at IS NULL` (if present)
-  2. otherwise pick one due schedule (`next_run_at <= now()`)
-
-Uses `FOR UPDATE SKIP LOCKED` to avoid concurrent contention.
-
-## Locking model
-
-- Job-level mutual exclusion via Postgres advisory locks:
-  - `pg_try_advisory_lock(hashtext(job_id))`
-- If lock unavailable:
-  - run is skipped/logged
-  - scheduler continues
-
-## Run lifecycle
-
-For scheduled and run-now execution:
-
-1. Insert `job_runs` row with `status='running'`
-2. Execute job implementation by `job_type`
-3. Update `job_runs.finished_at/status/error`
-4. Release advisory lock
-5. Write audit events and `job_run_logs`
+- poll interval comes from `SCHEDULER_POLL_SECONDS`
+- the loop first initializes one schedule with `next_run_at IS NULL`
+- otherwise it selects one due schedule with `FOR UPDATE SKIP LOCKED`
+- execution uses Postgres advisory locks keyed by job id so the same job does not run concurrently
+- interrupted `running` rows can be recovered on startup when `RECOVER_INTERRUPTED_RUNS_ON_STARTUP=true`
 
 Supported job types:
 
 - `graph_ingest`
 - `mv_refresh`
+- `copilot_telemetry`
 
-Unknown job types raise runtime error and mark run as failed.
+License mapping:
 
----
+- `graph_ingest` requires the `graph_ingest` feature
+- `copilot_telemetry` requires the `copilot_telemetry` feature
+- admin-triggered control actions require `job_control`
 
-## Heartbeat Thread (`app/heartbeat.py`)
+## Graph Ingestion
 
-Worker periodically POSTs to:
-
-- `WORKER_HEARTBEAT_URL` (default `http://web:3000/api/internal/worker-heartbeat`)
-
-Config:
-
-- `WORKER_HEARTBEAT_INTERVAL_SECONDS` (default 30)
-- `WORKER_HEARTBEAT_TIMEOUT_SECONDS` (default 5)
-- `WORKER_HEARTBEAT_FAIL_THRESHOLD` (default 2)
-
-State tracked in-memory:
-
-- last attempt time
-- last success time
-- consecutive failures
-- last error
-
-Health degrades when consecutive failures reach threshold.
-
----
-
-## Graph Client (`app/graph_client.py`)
-
-## Token acquisition
-
-- App-only token via MSAL confidential client
-- Scope: `https://graph.microsoft.com/.default`
-- Cached token with refresh margin
-
-## Request behavior
-
-- Base URL default: `https://graph.microsoft.com/v1.0`
-- Retries transport and transient HTTP statuses:
-  - `408`, `429`, `500`, `502`, `503`, `504`
-- Handles `401` by clearing token cache and retrying
-- Supports `Retry-After`
-- Exponential backoff with jitter
-
-## Pagination helpers
-
-- `iter_paged(...)` follows `@odata.nextLink`
-- `collect_paged(...)` materializes full list
-
----
-
-## Ingestion Pipeline (`app/jobs/graph_ingest.py`)
-
-`run_graph_ingest(run_id, job_id, actor)` executes stage pipeline.
+The Graph pipeline lives in [worker/app/jobs/graph_ingest.py](/Users/garrick-mac/Documents/GitHub/Princeton-Sentinel/worker/app/jobs/graph_ingest.py).
 
 Default stage order:
 
@@ -176,205 +117,7 @@ Default stage order:
 6. `drive_items`
 7. `permissions`
 
-Runtime controls (env-only):
-
-- `FLUSH_EVERY`
-- `GRAPH_SYNC_PULL_PERMISSIONS`
-- `GRAPH_SYNC_GROUP_MEMBERSHIPS`
-- `GRAPH_SYNC_GROUP_MEMBERSHIPS_USERS_ONLY`
-- `GRAPH_PERMISSIONS_BATCH_SIZE`
-- `GRAPH_PERMISSIONS_STALE_AFTER_HOURS`
-- `GRAPH_SYNC_STAGES` (comma-separated subset order)
-- `GRAPH_SYNC_SKIP_STAGES` (comma-separated exclusions)
-
-## Stage details
-
-### Users
-
-- Graph: `/users`
-- Upsert `msgraph_users`
-- Soft-delete rows not seen in current sync (`deleted_at`)
-
-### Groups
-
-- Graph: `/groups`
-- Upsert `msgraph_groups`
-- Soft-delete stale rows
-
-### Group memberships
-
-- For each active group, call `/groups/{id}/members`
-- Upsert `msgraph_group_memberships`
-- Optional filter to `user` members only
-- Per-group soft-delete of stale edges
-- Non-fatal skip on common Graph errors
-
-### Sites
-
-- Preferred: `/sites/delta`
-- Fallback: `/sites?search=*` on delta failure
-- Upserts active rows in `msgraph_sites`
-- Marks removed sites using `@removed`
-- Stores delta cursor in `msgraph_delta_state` (`resource_type='sites'`)
-
-### Drives
-
-Sources:
-
-- site drives (`/sites/{id}/drives`)
-- group drives (`/groups/{id}/drives`)
-- user drives (`/users/{id}/drives`)
-
-Writes:
-
-- Upsert `msgraph_drives`
-- Identity normalization for owner/createdBy/lastModifiedBy
-- Dedupe and merge rows by drive id before write
-
-### Drive items
-
-- Per drive: `/drives/{drive_id}/root/delta`
-- Stores active/removed item states in `msgraph_drive_items`
-- Handles delta expiration (`410`) by resetting drive cursor and retrying
-- For removed items, also deletes related rows from:
-  - `msgraph_drive_item_permission_grants`
-  - `msgraph_drive_item_permissions`
-- Advances delta cursor only if cleanup writes succeed
-
-### Permissions
-
-- Selects non-folder items from `msgraph_drive_items` when any of these are true:
-  - stale (`permissions_last_synced_at` older than cutoff)
-  - previously errored (`permissions_last_error_at` is set)
-  - recently updated (`modified_dt` within cutoff window)
-- Prioritizes errored items before oldest-sync items
-- Concurrently fetches `/drives/{drive}/items/{item}/permissions`
-- Rebuilds permission state per item:
-  - delete existing grants/permissions for successful keys
-  - insert fresh `msgraph_drive_item_permissions`
-  - insert fresh `msgraph_drive_item_permission_grants`
-- Updates item sync/error fields:
-  - `permissions_last_synced_at`
-  - `permissions_last_error_at`
-  - `permissions_last_error`
-  - `permissions_last_error_details` (structured diagnostics:
-    category/status/code/message/request URL/response excerpt/run phase/attempt)
-- For `404` permission fetch errors, clears cached permission/grant rows for the item and records structured diagnostics
-- Runs one end-of-stage retry pass for keys that failed earlier in the same run
-- Contains terminal failure handling:
-  - retry DB writes
-  - mark batch error if writes exhaust retries
-  - temporarily defer problematic keys
-  - drop keys after repeated terminal failures in same run
-
----
-
-## DB Write Resilience
-
-Shared DB retry utilities (`app/db.py` + helpers in ingest):
-
-- Retryable SQLSTATEs:
-  - `40P01` deadlock
-  - `55P03` lock_not_available
-  - `40001` serialization_failure
-- Exponential backoff + jitter controlled by env vars:
-  - `DB_WRITE_MAX_RETRIES`
-  - `DB_WRITE_RETRY_BASE_MS`
-  - `DB_WRITE_RETRY_MAX_MS`
-  - `DB_WRITE_RETRY_JITTER_MS`
-
-Non-retryable errors fail fast.
-
----
-
-## Logging and Audit
-
-Runtime logs:
-
-- `emit(level, actor, message)` with constrained actor/type sets
-- Actors include: `FLASK_API`, `SCHEDULER`, `HEARTBEAT`, `GRAPH`, `DB_CONN`
-
-Persistent logs/audit:
-
-- `audit_events` for control and job lifecycle actions
-- `job_run_logs` for per-run structured context messages
-
----
-
-## Integration with Web
-
-Web invokes worker through `WORKER_API_URL` and authenticates requests with `WORKER_INTERNAL_API_TOKEN`:
-
-- status
-- run-now
-- pause
-- resume
-
-For run-now/pause/resume web forwards actor claims; worker writes these to `audit_events`.
-
-Worker heartbeat depends on web internal endpoint availability for healthy status.
-
----
-
-## Integration with Database
-
-Worker is primary writer for:
-
-- `msgraph_users`
-- `msgraph_groups`
-- `msgraph_group_memberships`
-- `msgraph_sites`
-- `msgraph_drives`
-- `msgraph_drive_items`
-- `msgraph_drive_item_permissions`
-- `msgraph_drive_item_permission_grants`
-- `msgraph_delta_state`
-- `job_runs`
-- `job_run_logs`
-- `audit_events`
-
-DB trigger layer refreshes materialized views on base table writes (configured in DB init SQL).
-
----
-
-## Environment Variables (Worker-relevant)
-
-Required:
-
-- `DATABASE_URL`
-- `ENTRA_TENANT_ID`
-- `ENTRA_CLIENT_ID`
-- `ENTRA_CLIENT_SECRET`
-- `WORKER_INTERNAL_API_TOKEN`
-- `WORKER_HEARTBEAT_TOKEN`
-
-Scheduler:
-
-- `SCHEDULER_POLL_SECONDS`
-- `RECOVER_INTERRUPTED_RUNS_ON_STARTUP`
-
-Heartbeat:
-
-- `WORKER_HEARTBEAT_URL`
-- `WORKER_HEARTBEAT_INTERVAL_SECONDS`
-- `WORKER_HEARTBEAT_TIMEOUT_SECONDS`
-- `WORKER_HEARTBEAT_FAIL_THRESHOLD`
-
-Graph client:
-
-- `GRAPH_BASE`
-- `GRAPH_MAX_RETRIES`
-- `GRAPH_CONNECT_TIMEOUT`
-- `GRAPH_READ_TIMEOUT`
-- `GRAPH_PAGE_SIZE`
-- `GRAPH_MAX_CONCURRENCY`
-
-Permissions scan:
-
-- `GRAPH_PERMISSIONS_BATCH_SIZE`
-- `GRAPH_PERMISSIONS_STALE_AFTER_HOURS`
-
-Batching/retry:
+Runtime controls:
 
 - `FLUSH_EVERY`
 - `GRAPH_SYNC_PULL_PERMISSIONS`
@@ -382,21 +125,220 @@ Batching/retry:
 - `GRAPH_SYNC_GROUP_MEMBERSHIPS_USERS_ONLY`
 - `GRAPH_SYNC_STAGES`
 - `GRAPH_SYNC_SKIP_STAGES`
-- `DB_CONNECT_TIMEOUT_SECONDS`
+- `GRAPH_PERMISSIONS_BATCH_SIZE`
+- `GRAPH_PERMISSIONS_STALE_AFTER_HOURS`
+
+Important behavior:
+
+- users, groups, sites, drives, and items are stored as latest-state rows with soft deletes
+- `sites` uses delta where possible and falls back when needed
+- `drive_items` uses per-drive delta cursors
+- `permissions` uses targeted stale/error/recently-modified selection instead of full-tenant permission reload on every run
+- 404 permission fetches clear cached permission rows for the item and record structured diagnostics
+- the job queues impacted MVs after writes
+
+### Test mode
+
+Graph sync test mode is controlled jointly by:
+
+- DB feature flag `test_mode`
+- environment variable `GRAPH_SYNC_TEST_MODE_GROUP_ID`
+- persisted DB state in `graph_sync_mode_state`
+
+When enabled, the worker scopes Graph sync to the configured test group and can prune data outside that scope.
+
+## Materialized View Refresh Job
+
+`mv_refresh` lives in [worker/app/jobs/mv_refresh.py](/Users/garrick-mac/Documents/GitHub/Princeton-Sentinel/worker/app/jobs/mv_refresh.py).
+
+It:
+
+- reads queued view names from `mv_refresh_queue`
+- refreshes them with `REFRESH MATERIALIZED VIEW CONCURRENTLY`
+- records success timestamps in `mv_refresh_log`
+- deletes successfully refreshed queue entries
+
+Runtime tuning:
+
+- `MV_REFRESH_MAX_VIEWS_PER_RUN`
+
+## Copilot Telemetry Job
+
+`copilot_telemetry` lives in [worker/app/jobs/copilot_telemetry.py](/Users/garrick-mac/Documents/GitHub/Princeton-Sentinel/worker/app/jobs/copilot_telemetry.py).
+
+It reads Copilot Studio telemetry from Application Insights and writes:
+
+- `copilot_sessions`
+- `copilot_events`
+- `copilot_errors`
+- `copilot_topic_stats`
+- `copilot_tool_stats`
+- `copilot_response_times`
+- `copilot_topic_stats_hourly`
+- `copilot_tool_stats_hourly`
+
+Important behavior:
+
+- the job is seeded by default but skips cleanly when `APPINSIGHTS_APP_ID` or `APPINSIGHTS_API_KEY` is missing
+- `lookback_hours` comes from the job config row
+- session writes can enqueue `mv_copilot_summary` refresh work
+
+## Heartbeat
+
+Heartbeat logic lives in [worker/app/heartbeat.py](/Users/garrick-mac/Documents/GitHub/Princeton-Sentinel/worker/app/heartbeat.py).
+
+The worker periodically POSTs to the web endpoint configured by `WORKER_HEARTBEAT_URL`, normally:
+
+`http://web:3000/api/internal/worker-heartbeat`
+
+Controls:
+
+- `WORKER_HEARTBEAT_INTERVAL_SECONDS`
+- `WORKER_HEARTBEAT_TIMEOUT_SECONDS`
+- `WORKER_HEARTBEAT_FAIL_THRESHOLD`
+- `WORKER_HEARTBEAT_TOKEN`
+
+Health degrades when failures cross the configured threshold.
+
+## Graph And Dataverse Clients
+
+### Graph client
+
+[worker/app/graph_client.py](/Users/garrick-mac/Documents/GitHub/Princeton-Sentinel/worker/app/graph_client.py) handles:
+
+- app-only MSAL token acquisition with `https://graph.microsoft.com/.default`
+- retry/backoff for transient HTTP failures
+- `Retry-After` handling
+- pagination helpers for `@odata.nextLink`
+
+### Dataverse client
+
+[worker/app/dataverse_client.py](/Users/garrick-mac/Documents/GitHub/Princeton-Sentinel/worker/app/dataverse_client.py) handles:
+
+- client-credentials auth against `DATAVERSE_URL`
+- paged Dataverse table reads
+- single-row patch operations
+
+It is used by the worker API, not directly by browser clients.
+
+## Licensing Behavior
+
+License logic lives in [worker/app/license.py](/Users/garrick-mac/Documents/GitHub/Princeton-Sentinel/worker/app/license.py).
+
+Current behavior:
+
+- verifies signed artifacts from `license_artifacts` using `LICENSE_PUBLIC_KEY_PATH`
+- exposes a cached effective license summary
+- gates job-control and job-type-specific actions
+- supports local Docker emulation through `local_testing_state`
+
+In local Docker:
+
+- if `LOCAL_DOCKER_DEPLOYMENT=true` and local testing emulation is enabled, the worker reports a synthetic full-feature license
+- if emulation is disabled, the worker reports the missing-license fallback and write features stay read-only
+
+## Logging And Audit
+
+Worker logging has two layers:
+
+- runtime logs emitted through `emit(...)`
+- persistent DB records in:
+  - `audit_events`
+  - `job_run_logs`
+
+Run logs are structured and keyed by `run_id`, which is what the web run detail pages display.
+
+## Database Writes
+
+The worker is the primary writer for:
+
+- `msgraph_*`
+- `msgraph_delta_state`
+- `job_runs`
+- `job_run_logs`
+- `audit_events`
+- Copilot telemetry tables
+- agent-control support tables touched by worker-side actions
+
+DB write retries are applied for transient lock/contention errors using:
+
 - `DB_WRITE_MAX_RETRIES`
 - `DB_WRITE_RETRY_BASE_MS`
 - `DB_WRITE_RETRY_MAX_MS`
 - `DB_WRITE_RETRY_JITTER_MS`
 
----
+## Environment Variables
 
-## Operational Caveats
+Common worker-relevant variables:
 
-- Scheduler and API run in same process; very heavy ingest can impact API responsiveness.
-- Status may report worker degraded if heartbeat to web fails, even when DB/Graph ingestion remains possible.
-- Materialized view refresh load is triggered by DB triggers, not directly controlled in worker code.
-- `jobs.config` is not used for `graph_ingest`; runtime behavior is controlled by environment variables.
-- Job types are hardcoded; adding new jobs requires scheduler dispatch changes plus schema/API updates.
-- On startup, worker can auto-mark orphaned `running` rows as failed (`interrupted_worker_restart`) when `RECOVER_INTERRUPTED_RUNS_ON_STARTUP=true`.
-- Interrupted-run recovery commits DB updates before emitting recovered-count logs.
-- Recovery audit/log emission is best-effort; logging failures do not roll back recovered run state.
+- required:
+  - `DATABASE_URL`
+  - `ENTRA_TENANT_ID`
+  - `ENTRA_CLIENT_ID`
+  - `ENTRA_CLIENT_SECRET`
+  - `WORKER_INTERNAL_API_TOKEN`
+  - `WORKER_HEARTBEAT_TOKEN`
+- scheduler/runtime:
+  - `SCHEDULER_POLL_SECONDS`
+  - `RECOVER_INTERRUPTED_RUNS_ON_STARTUP`
+  - `WORKER_ENABLE_BACKGROUND_THREADS`
+  - `LOCAL_DOCKER_DEPLOYMENT`
+- heartbeat:
+  - `WORKER_HEARTBEAT_URL`
+  - `WORKER_HEARTBEAT_INTERVAL_SECONDS`
+  - `WORKER_HEARTBEAT_TIMEOUT_SECONDS`
+  - `WORKER_HEARTBEAT_FAIL_THRESHOLD`
+- Graph:
+  - `GRAPH_BASE`
+  - `GRAPH_MAX_CONCURRENCY`
+  - `GRAPH_MAX_RETRIES`
+  - `GRAPH_CONNECT_TIMEOUT`
+  - `GRAPH_READ_TIMEOUT`
+  - `GRAPH_PAGE_SIZE`
+  - `GRAPH_PERMISSIONS_BATCH_SIZE`
+  - `GRAPH_PERMISSIONS_STALE_AFTER_HOURS`
+  - `GRAPH_SYNC_PULL_PERMISSIONS`
+  - `GRAPH_SYNC_GROUP_MEMBERSHIPS`
+  - `GRAPH_SYNC_GROUP_MEMBERSHIPS_USERS_ONLY`
+  - `GRAPH_SYNC_STAGES`
+  - `GRAPH_SYNC_SKIP_STAGES`
+  - `GRAPH_SYNC_TEST_MODE_GROUP_ID`
+- refresh/write tuning:
+  - `FLUSH_EVERY`
+  - `MV_REFRESH_MAX_VIEWS_PER_RUN`
+  - `DB_CONNECT_TIMEOUT_SECONDS`
+  - `DB_WRITE_MAX_RETRIES`
+  - `DB_WRITE_RETRY_BASE_MS`
+  - `DB_WRITE_RETRY_MAX_MS`
+  - `DB_WRITE_RETRY_JITTER_MS`
+- optional integrations:
+  - `DATAVERSE_URL`
+  - `APPINSIGHTS_APP_ID`
+  - `APPINSIGHTS_API_KEY`
+  - `LICENSE_PUBLIC_KEY_PATH`
+  - `LICENSE_CACHE_TTL_SECONDS`
+
+See [../.env.example](/Users/garrick-mac/Documents/GitHub/Princeton-Sentinel/.env.example) for the current template.
+
+## Development Workflow
+
+Install dependencies and run tests:
+
+```bash
+cd worker
+python3 -m pip install -r requirements.txt
+python3 -m unittest discover -s tests
+```
+
+For full local integration, run the repository Compose stack from the repo root:
+
+```bash
+docker compose up --build
+```
+
+## Operational Notes
+
+- the worker is intentionally stateful in-memory for scheduler and heartbeat status, so those counters reset on restart
+- Dataverse and Conditional Access functionality are optional integrations; the internal API returns classified errors when they are not configured correctly
+- `copilot_telemetry` is a supported job type now and should be treated like the other worker jobs in operational docs and tooling
+- the worker is the authoritative writer for most runtime state transitions visible in the admin UI
