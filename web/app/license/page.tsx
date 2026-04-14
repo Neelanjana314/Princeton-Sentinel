@@ -2,6 +2,7 @@ import { withPageRequestTiming } from "@/app/lib/request-timing";
 import { requireAdmin, isAdmin } from "@/app/lib/auth";
 import { getCsrfRenderToken } from "@/app/lib/csrf-server";
 import { getFeatureFlagsPayload } from "@/app/lib/feature-flags";
+import { getLocalTestingMenuState } from "@/app/lib/local-testing-state";
 import { getCurrentLicenseSummary, type LicenseFeatureKey } from "@/app/lib/license";
 import { type SearchParams } from "@/app/lib/params";
 import AppShell from "@/components/app-shell";
@@ -52,12 +53,13 @@ const FEATURE_ORDER: LicenseFeatureKey[] = [
 ];
 
 async function LicensePage({ searchParams }: LicensePageProps) {
-  const [{ session, groups }, featureFlagsPayload, summary] = await Promise.all([
+  const [{ session, groups }, featureFlagsPayload, summary, localTestingMenuState, csrfToken] = await Promise.all([
     requireAdmin(),
     getFeatureFlagsPayload(),
     getCurrentLicenseSummary(),
+    getLocalTestingMenuState(),
+    getCsrfRenderToken(),
   ]);
-  const csrfToken = await getCsrfRenderToken();
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
 
   const userLabel = session.user?.name ?? session.user?.email ?? "Signed in";
@@ -88,6 +90,9 @@ async function LicensePage({ searchParams }: LicensePageProps) {
       canAdmin={canAdmin}
       initialFeatureFlags={featureFlagsPayload.flags}
       initialFeatureFlagVersion={featureFlagsPayload.version}
+      csrfToken={csrfToken}
+      showLocalTesting={localTestingMenuState.visible}
+      emulateLicenseEnabled={localTestingMenuState.emulateLicenseEnabled}
     >
       <main className="ps-page">
         <PageHeader

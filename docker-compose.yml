@@ -18,6 +18,7 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
+      LOCAL_DOCKER_DEPLOYMENT: "true"
       DATABASE_URL: ${DATABASE_URL}
       WORKER_INTERNAL_API_TOKEN: ${WORKER_INTERNAL_API_TOKEN}
       WORKER_HEARTBEAT_TOKEN: ${WORKER_HEARTBEAT_TOKEN}
@@ -37,6 +38,7 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
+      LOCAL_DOCKER_DEPLOYMENT: "true"
       DATABASE_URL: ${DATABASE_URL}
       WORKER_API_URL: ${WORKER_API_URL}
       WORKER_INTERNAL_API_TOKEN: ${WORKER_INTERNAL_API_TOKEN}

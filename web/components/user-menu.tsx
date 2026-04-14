@@ -9,6 +9,7 @@ import { buildThemeCookieValue, normalizeTheme, THEME_STORAGE_KEY, type ThemeMod
 type UserMenuProps = {
   userLabel: string;
   canAdmin: boolean;
+  showLocalTesting: boolean;
 };
 
 function readStoredTheme(): ThemeMode | null {
@@ -29,7 +30,11 @@ function persistTheme(mode: ThemeMode) {
   document.cookie = buildThemeCookieValue(mode);
 }
 
-export default function UserMenu({ userLabel, canAdmin }: UserMenuProps) {
+export default function UserMenu({
+  userLabel,
+  canAdmin,
+  showLocalTesting,
+}: UserMenuProps) {
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<ThemeMode>("light");
   const wrapperRef = useRef<HTMLDivElement | null>(null);
@@ -81,7 +86,7 @@ export default function UserMenu({ userLabel, canAdmin }: UserMenuProps) {
       {open ? (
         <div
           role="menu"
-          className="absolute right-0 z-50 mt-2 w-44 rounded-md border bg-card p-1 text-sm shadow-md"
+          className="absolute right-0 z-50 mt-2 w-64 rounded-md border bg-card p-1 text-sm shadow-md"
         >
           {canAdmin ? (
             <>
@@ -102,6 +107,16 @@ export default function UserMenu({ userLabel, canAdmin }: UserMenuProps) {
                 Admin
               </Link>
             </>
+          ) : null}
+          {showLocalTesting ? (
+            <Link
+              href="/testing"
+              role="menuitem"
+              className="block rounded px-3 py-2 text-muted-foreground hover:bg-accent hover:text-foreground"
+              onClick={() => setOpen(false)}
+            >
+              Testing
+            </Link>
           ) : null}
           <button
             type="button"

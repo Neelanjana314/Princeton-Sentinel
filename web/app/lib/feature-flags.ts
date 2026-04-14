@@ -22,7 +22,7 @@ type FeatureFlagVersionRow = {
   last_updated_at: string | Date | null;
 };
 
-const FEATURE_STATE_VERSION_TABLES = ["feature_flags", "active_license_artifact"] as const;
+const FEATURE_STATE_VERSION_TABLES = ["feature_flags", "active_license_artifact", "local_testing_state"] as const;
 
 type QueryFn = <T = any>(text: string, params?: any[]) => Promise<T[]>;
 

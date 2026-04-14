@@ -37,7 +37,7 @@ const ADMIN_PREFIXES = [
   "/api/analytics",
   "/api/agents/access-blocks",
 ];
-const USER_PREFIXES = ["/dashboard", "/sites", "/api/graph", "/api/feature-flags"];
+const USER_PREFIXES = ["/dashboard", "/sites", "/testing", "/api/graph", "/api/feature-flags", "/api/local-testing"];
 
 type TimingMeta = {
   requestId: string;

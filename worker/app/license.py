@@ -10,6 +10,8 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 
 from app import db
+from app.local_testing_state import get_local_testing_state
+from app.runtime_config import is_local_docker_deployment
 
 
 LICENSE_SCHEMA_VERSION = 1
@@ -71,6 +73,10 @@ def _default_features() -> Dict[str, bool]:
     return dict(LICENSE_FEATURE_DEFAULTS)
 
 
+def _fully_enabled_features() -> Dict[str, bool]:
+    return {key: True for key in LICENSE_FEATURE_DEFAULTS.keys()}
+
+
 def _fallback_summary(error: Optional[str], **overrides) -> Dict[str, Any]:
     summary = {
         "status": "invalid",
@@ -86,6 +92,31 @@ def _fallback_summary(error: Optional[str], **overrides) -> Dict[str, Any]:
     }
     summary.update(overrides)
     return summary
+
+
+def _local_docker_license_summary() -> Dict[str, Any]:
+    tenant_id = _non_empty_string(os.getenv("ENTRA_TENANT_ID")) or "local-docker"
+    features = _fully_enabled_features()
+    return {
+        "status": "active",
+        "mode": "full",
+        "verification_status": "verified",
+        "verification_error": None,
+        "artifact_id": None,
+        "sha256": None,
+        "uploaded_at": None,
+        "uploaded_by": {"oid": None, "upn": None, "name": None},
+        "payload": {
+            "schema_version": LICENSE_SCHEMA_VERSION,
+            "license_id": "local-docker-emulated-license",
+            "license_type": "local_docker",
+            "tenant_id": tenant_id,
+            "issued_at": "1970-01-01T00:00:00.000Z",
+            "expires_at": None,
+            "features": features,
+        },
+        "features": features,
+    }
 
 
 def get_license_lookup_failure_summary(error: Optional[str] = None) -> Dict[str, Any]:
@@ -301,19 +332,31 @@ def clear_license_cache():
 def get_current_license() -> Dict[str, Any]:
     global _summary_cache
     ttl_seconds = int(os.getenv("LICENSE_CACHE_TTL_SECONDS", "300") or "300")
-    meta = db.fetch_one(
-        """
-        SELECT ala.artifact_id, ala.updated_at, la.sha256
-        FROM active_license_artifact ala
-        LEFT JOIN license_artifacts la ON la.artifact_id = ala.artifact_id
-        WHERE ala.slot = 'default'
-        LIMIT 1
-        """
-    )
-    cache_key = "%s:%s:%s" % (
-        meta.get("artifact_id") if meta else "missing",
-        meta.get("sha256") if meta else "none",
-        _normalize_timestamp(meta.get("updated_at")) if meta else "none",
+    local_testing_state = get_local_testing_state() if is_local_docker_deployment() else None
+    meta = None
+    if local_testing_state is None:
+        meta = db.fetch_one(
+            """
+            SELECT ala.artifact_id, ala.updated_at, la.sha256
+            FROM active_license_artifact ala
+            LEFT JOIN license_artifacts la ON la.artifact_id = ala.artifact_id
+            WHERE ala.slot = 'default'
+            LIMIT 1
+            """
+        )
+    cache_key = (
+        "local:%s:%s"
+        % (
+            "enabled" if local_testing_state and local_testing_state["emulate_license_enabled"] else "disabled",
+            local_testing_state.get("updated_at") or "none",
+        )
+        if local_testing_state is not None
+        else "%s:%s:%s"
+        % (
+            meta.get("artifact_id") if meta else "missing",
+            meta.get("sha256") if meta else "none",
+            _normalize_timestamp(meta.get("updated_at")) if meta else "none",
+        )
     )
     now_ts = datetime.now(timezone.utc).timestamp()
 
@@ -321,7 +364,13 @@ def get_current_license() -> Dict[str, Any]:
         if _summary_cache and _summary_cache["cache_key"] == cache_key and _summary_cache["expires_at_ts"] > now_ts:
             return _summary_cache["summary"]
 
-    if not meta or not meta.get("artifact_id"):
+    if local_testing_state is not None:
+        summary = (
+            _local_docker_license_summary()
+            if local_testing_state["emulate_license_enabled"]
+            else _fallback_summary("license_missing", status="missing", verification_status="missing")
+        )
+    elif not meta or not meta.get("artifact_id"):
         summary = _fallback_summary("license_missing", status="missing", verification_status="missing")
     else:
         artifact = db.fetch_one(

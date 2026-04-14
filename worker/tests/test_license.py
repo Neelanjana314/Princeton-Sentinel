@@ -72,6 +72,7 @@ class WorkerLicenseTests(unittest.TestCase):
         self.original_public_key_path = os.environ.get("LICENSE_PUBLIC_KEY_PATH")
         self.original_tenant_id = os.environ.get("ENTRA_TENANT_ID")
         self.original_worker_token = os.environ.get("WORKER_INTERNAL_API_TOKEN")
+        self.original_local_docker = os.environ.get("LOCAL_DOCKER_DEPLOYMENT")
 
         os.environ["LICENSE_PUBLIC_KEY_PATH"] = str(self.public_key_path)
         os.environ["ENTRA_TENANT_ID"] = "tenant-a"
@@ -94,6 +95,10 @@ class WorkerLicenseTests(unittest.TestCase):
             os.environ.pop("WORKER_INTERNAL_API_TOKEN", None)
         else:
             os.environ["WORKER_INTERNAL_API_TOKEN"] = self.original_worker_token
+        if self.original_local_docker is None:
+            os.environ.pop("LOCAL_DOCKER_DEPLOYMENT", None)
+        else:
+            os.environ["LOCAL_DOCKER_DEPLOYMENT"] = self.original_local_docker
         clear_license_cache()
 
     def test_summarize_license_artifact_rejects_tenant_mismatch(self):
@@ -172,6 +177,41 @@ class WorkerLicenseTests(unittest.TestCase):
         mock_get_conn.assert_not_called()
         mock_log_audit_event.assert_called_once()
         self.assertEqual(mock_log_audit_event.call_args.kwargs["action"], "job_run_blocked_license")
+
+    @patch("app.license.get_local_testing_state", return_value={"emulate_license_enabled": True, "updated_at": "2026-04-14T12:00:00.000Z"})
+    def test_get_current_license_uses_local_enabled_emulation_in_local_docker(self, _get_local_testing_state):
+        os.environ["LOCAL_DOCKER_DEPLOYMENT"] = "true"
+        clear_license_cache()
+
+        summary = get_current_license()
+
+        self.assertEqual(summary["status"], "active")
+        self.assertEqual(summary["mode"], "full")
+        self.assertIsNone(summary["payload"]["expires_at"])
+        self.assertTrue(summary["features"]["job_control"])
+
+    @patch("app.license.get_local_testing_state", return_value={"emulate_license_enabled": False, "updated_at": "2026-04-14T12:01:00.000Z"})
+    def test_get_current_license_uses_local_disabled_emulation_in_local_docker(self, _get_local_testing_state):
+        os.environ["LOCAL_DOCKER_DEPLOYMENT"] = "true"
+        clear_license_cache()
+
+        summary = get_current_license()
+
+        self.assertEqual(summary["status"], "missing")
+        self.assertEqual(summary["mode"], "read_only")
+        self.assertEqual(summary["verification_error"], "license_missing")
+
+    @patch("app.license.get_local_testing_state")
+    @patch("app.license.db.fetch_one", return_value=None)
+    def test_get_current_license_ignores_local_testing_state_outside_local_docker(self, mock_fetch_one, mock_get_local_testing_state):
+        os.environ.pop("LOCAL_DOCKER_DEPLOYMENT", None)
+        clear_license_cache()
+
+        summary = get_current_license()
+
+        self.assertEqual(summary["status"], "missing")
+        mock_get_local_testing_state.assert_not_called()
+        mock_fetch_one.assert_called_once()
 
 
 if __name__ == "__main__":

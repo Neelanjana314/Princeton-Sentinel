@@ -8,13 +8,17 @@ import { promisify } from "node:util";
 import { generateKeyPairSync, createSign } from "node:crypto";
 
 import {
+  clearLicenseCache,
   LICENSE_SCHEMA_VERSION,
   LICENSE_SIGNATURE_DELIMITER,
   canonicalizeLicensePayload,
+  getCurrentLicenseSummary,
   inspectLicenseArtifact,
   setLicensePublicKeyForTests,
+  setLicenseQueryForTests,
   summarizeLicenseArtifactText,
 } from "../app/lib/license";
+import { setLocalTestingStateForTests } from "../app/lib/local-testing-state";
 
 const execFileAsync = promisify(execFile);
 
@@ -214,4 +218,117 @@ test("generator script output verifies end to end", async () => {
 
   setLicensePublicKeyForTests(null);
   await rm(tmpRoot, { recursive: true, force: true });
+});
+
+test("local docker with license emulation enabled returns a synthetic active no-expiry license", async () => {
+  const originalLocalDocker = process.env.LOCAL_DOCKER_DEPLOYMENT;
+  process.env.LOCAL_DOCKER_DEPLOYMENT = "true";
+  setLocalTestingStateForTests({ emulateLicenseEnabled: true, updatedAt: "2026-04-14T12:00:00.000Z" });
+  setLicenseQueryForTests(async () => {
+    throw new Error("license query should not run for local emulation");
+  });
+  clearLicenseCache();
+
+  try {
+    const summary = await getCurrentLicenseSummary();
+
+    assert.equal(summary.status, "active");
+    assert.equal(summary.mode, "full");
+    assert.equal(summary.verificationStatus, "verified");
+    assert.equal(summary.payload?.expires_at, null);
+    assert.equal(summary.features.graph_ingest, true);
+    assert.equal(summary.features.job_control, true);
+  } finally {
+    setLocalTestingStateForTests(null);
+    setLicenseQueryForTests(null);
+    clearLicenseCache();
+    if (originalLocalDocker === undefined) {
+      delete process.env.LOCAL_DOCKER_DEPLOYMENT;
+    } else {
+      process.env.LOCAL_DOCKER_DEPLOYMENT = originalLocalDocker;
+    }
+  }
+});
+
+test("local docker with license emulation disabled returns missing read-only license state", async () => {
+  const originalLocalDocker = process.env.LOCAL_DOCKER_DEPLOYMENT;
+  process.env.LOCAL_DOCKER_DEPLOYMENT = "true";
+  setLocalTestingStateForTests({ emulateLicenseEnabled: false, updatedAt: "2026-04-14T12:01:00.000Z" });
+  setLicenseQueryForTests(async () => {
+    throw new Error("license query should not run for local emulation");
+  });
+  clearLicenseCache();
+
+  try {
+    const summary = await getCurrentLicenseSummary();
+
+    assert.equal(summary.status, "missing");
+    assert.equal(summary.mode, "read_only");
+    assert.equal(summary.verificationStatus, "missing");
+    assert.equal(summary.verificationError, "license_missing");
+    assert.equal(summary.features.graph_ingest, false);
+  } finally {
+    setLocalTestingStateForTests(null);
+    setLicenseQueryForTests(null);
+    clearLicenseCache();
+    if (originalLocalDocker === undefined) {
+      delete process.env.LOCAL_DOCKER_DEPLOYMENT;
+    } else {
+      process.env.LOCAL_DOCKER_DEPLOYMENT = originalLocalDocker;
+    }
+  }
+});
+
+test("non-local deployments ignore local testing state and use the real license path", async () => {
+  const originalLocalDocker = process.env.LOCAL_DOCKER_DEPLOYMENT;
+  delete process.env.LOCAL_DOCKER_DEPLOYMENT;
+  setLocalTestingStateForTests(async () => {
+    throw new Error("local testing state should not be read outside local docker");
+  });
+  setLicenseQueryForTests(async <T = any>(text: string) => {
+    if (text.includes("FROM active_license_artifact")) {
+      return [] as T[];
+    }
+    throw new Error(`Unexpected license query: ${text}`);
+  });
+  clearLicenseCache();
+
+  try {
+    const summary = await getCurrentLicenseSummary();
+
+    assert.equal(summary.status, "missing");
+    assert.equal(summary.verificationStatus, "missing");
+    assert.equal(summary.verificationError, "license_missing");
+  } finally {
+    setLocalTestingStateForTests(null);
+    setLicenseQueryForTests(null);
+    clearLicenseCache();
+    if (originalLocalDocker !== undefined) {
+      process.env.LOCAL_DOCKER_DEPLOYMENT = originalLocalDocker;
+    }
+  }
+});
+
+test("local testing cache key changes invalidate cached license summaries", async () => {
+  const originalLocalDocker = process.env.LOCAL_DOCKER_DEPLOYMENT;
+  process.env.LOCAL_DOCKER_DEPLOYMENT = "true";
+  setLocalTestingStateForTests({ emulateLicenseEnabled: true, updatedAt: "2026-04-14T12:02:00.000Z" });
+  clearLicenseCache();
+
+  try {
+    const enabledSummary = await getCurrentLicenseSummary();
+    setLocalTestingStateForTests({ emulateLicenseEnabled: false, updatedAt: "2026-04-14T12:03:00.000Z" });
+    const disabledSummary = await getCurrentLicenseSummary();
+
+    assert.equal(enabledSummary.status, "active");
+    assert.equal(disabledSummary.status, "missing");
+  } finally {
+    setLocalTestingStateForTests(null);
+    clearLicenseCache();
+    if (originalLocalDocker === undefined) {
+      delete process.env.LOCAL_DOCKER_DEPLOYMENT;
+    } else {
+      process.env.LOCAL_DOCKER_DEPLOYMENT = originalLocalDocker;
+    }
+  }
 });

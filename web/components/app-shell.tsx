@@ -27,10 +27,25 @@ type AppShellProps = {
   canAdmin: boolean;
   initialFeatureFlags: FeatureFlags;
   initialFeatureFlagVersion: string | null;
+  csrfToken: string;
+  showLocalTesting: boolean;
+  emulateLicenseEnabled: boolean;
   children: React.ReactNode;
 };
 
-function AppShellContent({ userLabel, canAdmin, children }: Omit<AppShellProps, "initialFeatureFlags" | "initialFeatureFlagVersion">) {
+type AppShellContentProps = {
+  userLabel: string;
+  canAdmin: boolean;
+  showLocalTesting: boolean;
+  children: React.ReactNode;
+};
+
+function AppShellContent({
+  userLabel,
+  canAdmin,
+  showLocalTesting,
+  children,
+}: AppShellContentProps) {
   const pathname = usePathname() ?? "/";
   const router = useRouter();
   const { flags } = useFeatureFlags();
@@ -143,7 +158,11 @@ function AppShellContent({ userLabel, canAdmin, children }: Omit<AppShellProps, 
             </nav>
           </div>
           <div className="flex items-center gap-2">
-            <UserMenu userLabel={userLabel} canAdmin={canAdmin} />
+            <UserMenu
+              userLabel={userLabel}
+              canAdmin={canAdmin}
+              showLocalTesting={showLocalTesting}
+            />
             <div className="relative lg:hidden" ref={mobileNavRef}>
               <button
                 type="button"
@@ -209,11 +228,16 @@ export default function AppShell({
   canAdmin,
   initialFeatureFlags,
   initialFeatureFlagVersion,
+  showLocalTesting,
   children,
 }: AppShellProps) {
   return (
     <FeatureFlagsProvider initialFlags={initialFeatureFlags} initialVersion={initialFeatureFlagVersion}>
-      <AppShellContent userLabel={userLabel} canAdmin={canAdmin}>
+      <AppShellContent
+        userLabel={userLabel}
+        canAdmin={canAdmin}
+        showLocalTesting={showLocalTesting}
+      >
         {children}
       </AppShellContent>
     </FeatureFlagsProvider>

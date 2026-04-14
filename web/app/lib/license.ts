@@ -2,6 +2,9 @@ import { createHash, createVerify } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import type { PoolClient } from "pg";
 
+import { getLocalTestingState } from "./local-testing-state";
+import { isLocalDockerDeployment } from "./runtime";
+
 export const LICENSE_SCHEMA_VERSION = 1;
 export const LICENSE_SIGNATURE_DELIMITER = "\n---SIGNATURE---\n";
 
@@ -94,6 +97,7 @@ type SummaryMetadata = {
 };
 
 type SummaryOverride = EffectiveLicenseSummary | (() => Promise<EffectiveLicenseSummary>);
+type LicenseQueryFn = <T = any>(text: string, params?: any[]) => Promise<T[]>;
 
 export class LicenseFeatureError extends Error {
   featureKey: LicenseFeatureKey;
@@ -108,6 +112,7 @@ export class LicenseFeatureError extends Error {
 
 let summaryOverride: SummaryOverride | null = null;
 let publicKeyOverride: string | null = null;
+let licenseQueryOverride: LicenseQueryFn | null = null;
 let cachedSummary:
   | {
       cacheKey: string;
@@ -123,6 +128,10 @@ let cachedPublicKey:
   | null = null;
 
 async function runLicenseQuery<T = any>(text: string, params?: any[]): Promise<T[]> {
+  if (licenseQueryOverride) {
+    return licenseQueryOverride<T>(text, params);
+  }
+
   const db = await import("./db");
   return db.query<T>(text, params);
 }
@@ -177,6 +186,12 @@ function getDefaultLicenseFeatures(): LicenseFeatures {
   return { ...LICENSE_FEATURE_DEFAULTS };
 }
 
+function getFullyEnabledLicenseFeatures(): LicenseFeatures {
+  return Object.fromEntries(
+    (Object.keys(LICENSE_FEATURE_DEFAULTS) as LicenseFeatureKey[]).map((key) => [key, true])
+  ) as LicenseFeatures;
+}
+
 function getReadOnlyFallbackSummary(error: string | null, overrides?: Partial<EffectiveLicenseSummary>): EffectiveLicenseSummary {
   return {
     status: overrides?.status ?? "invalid",
@@ -189,6 +204,32 @@ function getReadOnlyFallbackSummary(error: string | null, overrides?: Partial<Ef
     uploadedBy: overrides?.uploadedBy ?? { oid: null, upn: null, name: null },
     payload: overrides?.payload ?? null,
     features: overrides?.features ?? getDefaultLicenseFeatures(),
+  };
+}
+
+function getLocalDockerLicenseSummary(): EffectiveLicenseSummary {
+  const tenantId = asNonEmptyString(process.env.ENTRA_TENANT_ID) || "local-docker";
+  const features = getFullyEnabledLicenseFeatures();
+
+  return {
+    status: "active",
+    mode: "full",
+    verificationStatus: "verified",
+    verificationError: null,
+    artifactId: null,
+    sha256: null,
+    uploadedAt: null,
+    uploadedBy: { oid: null, upn: null, name: null },
+    payload: {
+      schema_version: LICENSE_SCHEMA_VERSION,
+      license_id: "local-docker-emulated-license",
+      license_type: "local_docker",
+      tenant_id: tenantId,
+      issued_at: "1970-01-01T00:00:00.000Z",
+      expires_at: null,
+      features,
+    },
+    features,
   };
 }
 
@@ -469,6 +510,11 @@ export function setLicenseSummaryForTests(override: SummaryOverride | null) {
   clearLicenseCache();
 }
 
+export function setLicenseQueryForTests(queryFn: LicenseQueryFn | null) {
+  licenseQueryOverride = queryFn;
+  clearLicenseCache();
+}
+
 export function setLicensePublicKeyForTests(value: string | null) {
   publicKeyOverride = value;
   cachedPublicKey = null;
@@ -480,8 +526,11 @@ export async function getCurrentLicenseSummary(): Promise<EffectiveLicenseSummar
     return typeof summaryOverride === "function" ? summaryOverride() : summaryOverride;
   }
 
-  const meta = await getActiveLicenseMeta();
-  const cacheKey = `${meta?.artifact_id || "missing"}:${meta?.sha256 || "none"}:${normalizeTimestamp(meta?.updated_at) || "none"}`;
+  const localTestingState = isLocalDockerDeployment() ? await getLocalTestingState() : null;
+  const meta = localTestingState ? null : await getActiveLicenseMeta();
+  const cacheKey = localTestingState
+    ? `local:${localTestingState.emulateLicenseEnabled ? "enabled" : "disabled"}:${localTestingState.updatedAt || "none"}`
+    : `${meta?.artifact_id || "missing"}:${meta?.sha256 || "none"}:${normalizeTimestamp(meta?.updated_at) || "none"}`;
   const ttlMs = getLicenseCacheTtlMs();
 
   if (cachedSummary && cachedSummary.cacheKey === cacheKey && cachedSummary.expiresAtMs > Date.now()) {
@@ -490,7 +539,11 @@ export async function getCurrentLicenseSummary(): Promise<EffectiveLicenseSummar
 
   let summary: EffectiveLicenseSummary;
 
-  if (!meta?.artifact_id) {
+  if (localTestingState) {
+    summary = localTestingState.emulateLicenseEnabled
+      ? getLocalDockerLicenseSummary()
+      : getReadOnlyFallbackSummary("license_missing", { status: "missing", verificationStatus: "missing" });
+  } else if (!meta?.artifact_id) {
     summary = getReadOnlyFallbackSummary("license_missing", { status: "missing", verificationStatus: "missing" });
   } else {
     const row = await getActiveArtifactRow(meta.artifact_id);

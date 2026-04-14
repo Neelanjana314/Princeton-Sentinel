@@ -93,6 +93,21 @@ test("getFeatureFlagVersion accounts for active license changes", async () => {
   clearMockQuery();
 });
 
+test("getFeatureFlagVersion watches local testing state updates", async () => {
+  let capturedParams: any[] | undefined;
+  setFeatureFlagsQueryForTests(async <T = any>(_text: string, params?: any[]) => {
+    capturedParams = params;
+    return [{ last_updated_at: "2026-04-14T12:00:00.000Z" }] as T[];
+  });
+
+  const version = await getFeatureFlagVersion();
+
+  assert.equal(version, "2026-04-14T12:00:00.000Z");
+  assert.deepEqual(capturedParams, [["feature_flags", "active_license_artifact", "local_testing_state"]]);
+
+  clearMockQuery();
+});
+
 test("getFeatureFlagsPayload returns both flags and version", async () => {
   setMockQuery([
     [{ feature_key: "agents_dashboard", enabled: false }],

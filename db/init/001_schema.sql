@@ -424,6 +424,13 @@ CREATE TABLE IF NOT EXISTS active_license_artifact (
   CHECK (slot = 'default')
 );
 
+CREATE TABLE IF NOT EXISTS local_testing_state (
+  state_key text PRIMARY KEY,
+  emulate_license_enabled boolean NOT NULL DEFAULT true,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CHECK (state_key = 'default')
+);
+
 CREATE OR REPLACE FUNCTION reject_license_artifact_mutation() RETURNS trigger AS $$
 BEGIN
   RAISE EXCEPTION 'license_artifacts are immutable';
@@ -504,6 +511,10 @@ CREATE TRIGGER trg_touch_active_license_artifact
 AFTER INSERT OR UPDATE OR DELETE ON active_license_artifact
 FOR EACH ROW EXECUTE FUNCTION touch_table_update_log();
 
+CREATE TRIGGER trg_touch_local_testing_state
+AFTER INSERT OR UPDATE OR DELETE ON local_testing_state
+FOR EACH ROW EXECUTE FUNCTION touch_table_update_log();
+
 CREATE TRIGGER trg_notify_feature_flags_state
 AFTER INSERT OR UPDATE OR DELETE ON feature_flags
 FOR EACH ROW EXECUTE FUNCTION notify_feature_state_changed();
@@ -512,6 +523,14 @@ CREATE TRIGGER trg_notify_active_license_feature_state
 AFTER INSERT OR UPDATE OR DELETE ON active_license_artifact
 FOR EACH ROW EXECUTE FUNCTION notify_feature_state_changed();
 
+CREATE TRIGGER trg_notify_local_testing_state
+AFTER INSERT OR UPDATE OR DELETE ON local_testing_state
+FOR EACH ROW EXECUTE FUNCTION notify_feature_state_changed();
+
+CREATE TRIGGER trg_local_testing_state_updated_at
+BEFORE UPDATE ON local_testing_state
+FOR EACH ROW EXECUTE FUNCTION set_feature_flags_updated_at();
+
 CREATE TRIGGER trg_reject_license_artifact_update
 BEFORE UPDATE ON license_artifacts
 FOR EACH ROW EXECUTE FUNCTION reject_license_artifact_mutation();
@@ -519,6 +538,10 @@ FOR EACH ROW EXECUTE FUNCTION reject_license_artifact_mutation();
 CREATE TRIGGER trg_reject_license_artifact_delete
 BEFORE DELETE ON license_artifacts
 FOR EACH ROW EXECUTE FUNCTION reject_license_artifact_mutation();
+
+INSERT INTO local_testing_state (state_key, emulate_license_enabled)
+VALUES ('default', true)
+ON CONFLICT (state_key) DO NOTHING;
 
 DO $$
 BEGIN
