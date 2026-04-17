@@ -14,6 +14,7 @@ import {
   sanitizeAccountHint,
 } from "@/app/lib/account-hint";
 import { getSessionCookieName, shouldUseSecureAuthCookies } from "@/app/lib/auth-cookies";
+import { getBootScopedAuthSecret } from "@/app/lib/auth-secret";
 import { attachCsrfCookie, CSRF_REQUEST_TOKEN_HEADER, ensureCsrfToken, getCsrfCookieName } from "@/app/lib/csrf";
 import {
   applySecurityHeaders,
@@ -36,6 +37,7 @@ const ADMIN_PREFIXES = [
   "/api/runs",
   "/api/analytics",
   "/api/agents/access-blocks",
+  "/api/copilot-quarantine",
 ];
 const USER_PREFIXES = ["/dashboard", "/sites", "/testing", "/api/graph", "/api/feature-flags", "/api/local-testing"];
 
@@ -161,7 +163,7 @@ export async function proxy(req: NextRequest) {
     const response = applySensitiveNoCacheHeaders(nextWithTiming(req, timing, nonce));
     const token = await getToken({
       req,
-      secret: process.env.NEXTAUTH_SECRET,
+      secret: getBootScopedAuthSecret(),
       secureCookie: shouldUseSecureAuthCookies(),
       cookieName: getSessionCookieName(),
     });
@@ -190,7 +192,7 @@ export async function proxy(req: NextRequest) {
 
   const token = await getToken({
     req,
-    secret: process.env.NEXTAUTH_SECRET,
+    secret: getBootScopedAuthSecret(),
     secureCookie: shouldUseSecureAuthCookies(),
     cookieName: getSessionCookieName(),
   });

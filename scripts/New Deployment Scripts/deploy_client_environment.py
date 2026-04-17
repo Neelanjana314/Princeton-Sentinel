@@ -1214,8 +1214,6 @@ def ensure_runtime_defaults(state: dict[str, Any]) -> None:
         runtime["WORKER_HEARTBEAT_URL"] = f"https://{azure.get('web_fqdn')}/api/internal/worker-heartbeat"
     if not runtime.get("LICENSE_PUBLIC_KEY_PATH"):
         runtime["LICENSE_PUBLIC_KEY_PATH"] = DEFAULT_LICENSE_PUBLIC_KEY_MOUNT_PATH
-    if not runtime.get("NEXTAUTH_SECRET"):
-        runtime["NEXTAUTH_SECRET"] = generate_secret(48)
     if not runtime.get("WORKER_INTERNAL_API_TOKEN"):
         runtime["WORKER_INTERNAL_API_TOKEN"] = generate_secret(48)
     if not runtime.get("WORKER_HEARTBEAT_TOKEN"):
@@ -1246,10 +1244,13 @@ def runtime_env_for_scripts(state: dict[str, Any]) -> dict[str, str]:
         "AZ_WORKER_APP_NAME": azure["worker_app_name"],
         "STG_DATABASE_URL": runtime["DATABASE_URL"],
         "STG_DATAVERSE_BASE_URL": runtime["DATAVERSE_BASE_URL"],
+        "STG_POWER_PLATFORM_ENVIRONMENT_ID": runtime.get("POWER_PLATFORM_ENVIRONMENT_ID", ""),
         "STG_DATAVERSE_TABLE_URL": runtime["DATAVERSE_TABLE_URL"],
         "STG_DATAVERSE_COLUMN_PREFIX": runtime["DATAVERSE_COLUMN_PREFIX"],
+        "STG_DATAVERSE_AGENT_SECURITY_GROUP_MAPPING_TABLE_URL": runtime.get(
+            "DATAVERSE_AGENT_SECURITY_GROUP_MAPPING_TABLE_URL", ""
+        ),
         "STG_ENTRA_CLIENT_SECRET": runtime["ENTRA_CLIENT_SECRET"],
-        "STG_NEXTAUTH_SECRET": runtime["NEXTAUTH_SECRET"],
         "STG_WORKER_INTERNAL_API_TOKEN": runtime["WORKER_INTERNAL_API_TOKEN"],
         "STG_WORKER_HEARTBEAT_TOKEN": runtime["WORKER_HEARTBEAT_TOKEN"],
         "STG_NEXTAUTH_URL": runtime["NEXTAUTH_URL"],
@@ -1297,7 +1298,6 @@ def sync_web_config(state: dict[str, Any], *, dry_run: bool, io: BaseIO) -> None
             "scripts/ci/validate-required-env.sh",
             "STG_DATABASE_URL",
             "STG_ENTRA_CLIENT_SECRET",
-            "STG_NEXTAUTH_SECRET",
             "STG_WORKER_INTERNAL_API_TOKEN",
             "STG_WORKER_HEARTBEAT_TOKEN",
             "STG_ENTRA_TENANT_ID",
@@ -1310,14 +1310,14 @@ def sync_web_config(state: dict[str, Any], *, dry_run: bool, io: BaseIO) -> None
         env=env,
         dry_run=dry_run,
         io=io,
-        secrets_to_mask=[env["STG_DATABASE_URL"], env["STG_ENTRA_CLIENT_SECRET"], env["STG_NEXTAUTH_SECRET"], env["STG_WORKER_INTERNAL_API_TOKEN"], env["STG_WORKER_HEARTBEAT_TOKEN"]],
+        secrets_to_mask=[env["STG_DATABASE_URL"], env["STG_ENTRA_CLIENT_SECRET"], env["STG_WORKER_INTERNAL_API_TOKEN"], env["STG_WORKER_HEARTBEAT_TOKEN"]],
     )
     run_command(
         ["scripts/ci/sync-staging-web-config.sh"],
         env=env,
         dry_run=dry_run,
         io=io,
-        secrets_to_mask=[env["STG_DATABASE_URL"], env["STG_ENTRA_CLIENT_SECRET"], env["STG_NEXTAUTH_SECRET"], env["STG_WORKER_INTERNAL_API_TOKEN"], env["STG_WORKER_HEARTBEAT_TOKEN"]],
+        secrets_to_mask=[env["STG_DATABASE_URL"], env["STG_ENTRA_CLIENT_SECRET"], env["STG_WORKER_INTERNAL_API_TOKEN"], env["STG_WORKER_HEARTBEAT_TOKEN"]],
     )
 
 
@@ -1712,11 +1712,20 @@ def phase_capture_runtime(state: dict[str, Any], *, io: BaseIO) -> dict[str, Any
     prompt_or_default(io, state, "runtime", "WORKER_API_URL", "WORKER_API_URL", validator=validate_non_empty)
     prompt_or_default(io, state, "runtime", "WORKER_HEARTBEAT_URL", "WORKER_HEARTBEAT_URL", validator=validate_non_empty)
     prompt_or_default(io, state, "runtime", "DATAVERSE_BASE_URL", "DATAVERSE_BASE_URL", validator=validate_non_empty)
+    prompt_or_default(io, state, "runtime", "POWER_PLATFORM_ENVIRONMENT_ID", "POWER_PLATFORM_ENVIRONMENT_ID", allow_empty=True, validator=None)
     prompt_or_default(io, state, "runtime", "DATAVERSE_TABLE_URL", "DATAVERSE_TABLE_URL", validator=validate_non_empty)
     prompt_or_default(io, state, "runtime", "DATAVERSE_COLUMN_PREFIX", "DATAVERSE_COLUMN_PREFIX", validator=validate_non_empty)
+    prompt_or_default(
+        io,
+        state,
+        "runtime",
+        "DATAVERSE_AGENT_SECURITY_GROUP_MAPPING_TABLE_URL",
+        "DATAVERSE_AGENT_SECURITY_GROUP_MAPPING_TABLE_URL",
+        allow_empty=True,
+        validator=None,
+    )
     prompt_or_default(io, state, "runtime", "APPINSIGHTS_APP_ID", "APPINSIGHTS_APP_ID", allow_empty=True, validator=None)
     prompt_or_default(io, state, "runtime", "APPINSIGHTS_API_KEY", "APPINSIGHTS_API_KEY", secret=True, allow_empty=True, validator=None)
-    prompt_or_default(io, state, "runtime", "NEXTAUTH_SECRET", "NEXTAUTH_SECRET", secret=True)
     prompt_or_default(io, state, "runtime", "WORKER_INTERNAL_API_TOKEN", "WORKER_INTERNAL_API_TOKEN", secret=True)
     prompt_or_default(io, state, "runtime", "WORKER_HEARTBEAT_TOKEN", "WORKER_HEARTBEAT_TOKEN", secret=True)
     prompt_or_default(io, state, "runtime", "LOCAL_LICENSE_PUBLIC_KEY_PATH", "Local license public key path", validator=validate_non_empty)

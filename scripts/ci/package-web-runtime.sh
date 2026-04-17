@@ -58,8 +58,18 @@ COPY . ./
 
 EXPOSE 3000
 
-CMD ["node", "server.js"]
+CMD ["./entrypoint.sh"]
 EOF
+
+cat > "${runtime_dir}/entrypoint.sh" <<'EOF'
+#!/bin/sh
+
+set -eu
+
+exec node server.js
+EOF
+
+chmod +x "${runtime_dir}/entrypoint.sh"
 
 if [[ ! -f "${runtime_dir}/server.js" ]]; then
   echo "Packaged web runtime is missing server.js" >&2
@@ -73,6 +83,11 @@ fi
 
 if [[ ! -d "${runtime_dir}/public" ]]; then
   echo "Packaged web runtime is missing public assets" >&2
+  exit 1
+fi
+
+if [[ ! -x "${runtime_dir}/entrypoint.sh" ]]; then
+  echo "Packaged web runtime is missing executable entrypoint.sh" >&2
   exit 1
 fi
 

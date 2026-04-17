@@ -8,6 +8,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Button } from "@/components/ui/button";
 import LocalDateTime from "@/components/local-date-time";
 import { getDvColumns, type DvColumns } from "@/app/lib/dv-columns";
+import PageHeader from "@/components/page-header";
+import MetricGrid from "@/components/metric-grid";
+import { MetricCard } from "@/components/metric-card";
 
 const TIMESTAMP_KEYS = new Set(["modifiedon"]);
 
@@ -33,6 +36,31 @@ type ActiveBlock = {
   system_modified_by: string;
   blocked_at: string;
   block_reason: string | null;
+};
+
+type QuarantineAgent = {
+  botId: string;
+  botName: string;
+  lastUpdateTimeUtc: string | null;
+  isQuarantined: boolean | null;
+  state: string;
+  actionLabel: "Block" | "Unblock";
+  error: string | null;
+};
+
+type QuarantineContext = {
+  canView: boolean;
+  canAct: boolean;
+  needsConsent: boolean;
+  hasRequiredScope: boolean;
+  roleCheck?: {
+    allowed: boolean;
+    matchedRoles: string[];
+    roleNames: string[];
+    checkedAt: string;
+    error: string | null;
+  };
+  agents: QuarantineAgent[];
 };
 
 function normalizeValue(value: string | null | undefined): string {
@@ -148,7 +176,10 @@ export default function DataverseTableClient({
   const [blockErrorType, setBlockErrorType] = React.useState<string | null>(null);
   const [selectedAgent, setSelectedAgent] = React.useState("");
   const [selectedUser, setSelectedUser] = React.useState("");
-  const [blockReason, setBlockReason] = React.useState("");
+  const [quarantineContext, setQuarantineContext] = React.useState<QuarantineContext | null>(null);
+  const [quarantineLoading, setQuarantineLoading] = React.useState(true);
+  const [quarantineError, setQuarantineError] = React.useState<string | null>(null);
+  const [quarantineSubmittingBotId, setQuarantineSubmittingBotId] = React.useState<string | null>(null);
   const [modal, setModal] = React.useState<{
     title: string;
     description: string;
@@ -183,6 +214,34 @@ export default function DataverseTableClient({
   React.useEffect(() => {
     fetchDv();
   }, [fetchDv]);
+
+  const fetchQuarantineContext = React.useCallback(async () => {
+    try {
+      const res = await fetch("/api/copilot-quarantine/context");
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setQuarantineError(data.error || `Failed to load (${res.status})`);
+        return;
+      }
+      setQuarantineContext({
+        canView: Boolean(data.canView),
+        canAct: Boolean(data.canAct),
+        needsConsent: Boolean(data.needsConsent),
+        hasRequiredScope: Boolean(data.hasRequiredScope),
+        roleCheck: data.roleCheck,
+        agents: Array.isArray(data.agents) ? data.agents : [],
+      });
+      setQuarantineError(null);
+    } catch {
+      setQuarantineError("Failed to load quarantine data");
+    } finally {
+      setQuarantineLoading(false);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    fetchQuarantineContext();
+  }, [fetchQuarantineContext]);
 
   const dvAgents = React.useMemo(() => {
     const seen = new Set<string>();
@@ -221,6 +280,18 @@ export default function DataverseTableClient({
   }, [rows, selectedAgent, cols]);
 
   const activeBlocks = React.useMemo(() => deriveActiveBlocks(rows, cols), [rows, cols]);
+  const uniqueAssignedUsers = React.useMemo(() => {
+    const seen = new Set<string>();
+    rows.forEach((row) => {
+      const user = normalizeValue(row[cols.username]);
+      if (user) seen.add(user);
+    });
+    return seen.size;
+  }, [rows, cols]);
+  const quarantinedAgentsCount = React.useMemo(
+    () => quarantineContext?.agents.filter((agent) => agent.isQuarantined).length ?? 0,
+    [quarantineContext]
+  );
   const sortedRows = React.useMemo(() => {
     const { key, direction } = sortConfig;
     const multiplier = direction === "asc" ? 1 : -1;
@@ -246,7 +317,7 @@ export default function DataverseTableClient({
     setModal({
       title: "Confirm Block",
       description: `Block "${selectedUser}" from "${selectedAgent}"?`,
-      reason: blockReason,
+      reason: "",
       onConfirm: (reason) => executeBlock(reason),
     });
   }
@@ -283,7 +354,6 @@ export default function DataverseTableClient({
         setRows((prev) => patchDvState(prev, dvRow?.[cols.id], true, trimmedReason, cols));
         setSelectedUser("");
         setSelectedAgent("");
-        setBlockReason("");
         await fetchDv();
       }
     } catch {
@@ -339,38 +409,190 @@ export default function DataverseTableClient({
     }
   }
 
-  const selectClass = "rounded-md border border-input bg-background px-3 py-1.5 text-sm";
-  const inputClass = "rounded-md border border-input bg-background px-3 py-1.5 text-sm";
-  const formReady = selectedUser && selectedAgent && blockReason.trim() && !submitting;
+  const selectClass = "h-10 w-full rounded-md border border-input bg-background px-3 text-sm";
+  const formReady = selectedUser && selectedAgent && !submitting;
+
+  async function executeQuarantineAction(agent: QuarantineAgent, reason: string) {
+    const trimmedReason = reason.trim();
+    if (!canManageAccess || !quarantineContext?.canAct || !trimmedReason) return;
+    setQuarantineSubmittingBotId(agent.botId);
+    setQuarantineError(null);
+    const actionPath = agent.isQuarantined ? "/api/copilot-quarantine/unquarantine" : "/api/copilot-quarantine/quarantine";
+    try {
+      const res = await fetch(actionPath, {
+        method: "POST",
+        headers: getCsrfFetchHeaders({ "Content-Type": "application/json", "X-CSRF-Token": csrfToken }),
+        body: JSON.stringify({ botId: agent.botId, botName: agent.botName, reason: trimmedReason }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setQuarantineError(data.error || "Quarantine action failed");
+        return;
+      }
+      if (data?.agent) {
+        setQuarantineContext((current) =>
+          current
+            ? {
+                ...current,
+                agents: current.agents.map((row) => (row.botId === agent.botId ? data.agent : row)),
+              }
+            : current
+        );
+      }
+      await fetchQuarantineContext();
+    } catch {
+      setQuarantineError("Quarantine action failed");
+    } finally {
+      setQuarantineSubmittingBotId(null);
+    }
+  }
+
+  function handleQuarantineAction(agent: QuarantineAgent) {
+    if (!canManageAccess || !quarantineContext?.canAct) return;
+    const actionLabel = agent.isQuarantined ? "Unblock" : "Block";
+    setModal({
+      title: `Confirm ${actionLabel}`,
+      description: `${actionLabel} "${agent.botName || agent.botId}" at the agent level?`,
+      reason: "",
+      onConfirm: (reason) => executeQuarantineAction(agent, reason),
+    });
+  }
 
   return (
-    <main className="mx-auto max-w-[1400px] space-y-4 px-4 py-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Agent-User Information</h1>
-          <p className="text-sm text-muted-foreground">
-            Live data from Dataverse - agent access assignments
-          </p>
-        </div>
-        <Link href="/dashboard/agents">
-          <Button variant="outline" size="sm">
-            {"<-"} Back to Agents
-          </Button>
-        </Link>
-      </div>
+    <main className="ps-page">
+      <PageHeader
+        title="Agent Access Control"
+        subtitle="Manage Dataverse-backed user access assignments and agent quarantine controls."
+        actions={
+          <Link href="/dashboard/agents">
+            <Button variant="outline" size="sm">
+              {"<-"} Back to Agents
+            </Button>
+          </Link>
+        }
+      />
+
+      <MetricGrid>
+        <MetricCard
+          label="Assignments"
+          value={dvLoading ? "—" : rows.length.toLocaleString()}
+          detail={dvLoading ? "Loading Dataverse records" : ""}
+        />
+        <MetricCard
+          label="Agents"
+          value={dvLoading ? "—" : dvAgents.length.toLocaleString()}
+          detail={dvLoading ? "Loading distinct agents" : ""}
+        />
+        <MetricCard
+          label="Assigned Users"
+          value={dvLoading ? "—" : uniqueAssignedUsers.toLocaleString()}
+          detail={dvLoading ? "Loading distinct users" : ""}
+        />
+        <MetricCard
+          label="Active Blocks"
+          value={dvLoading ? "—" : activeBlocks.length.toLocaleString()}
+          detail={
+            quarantineLoading
+              ? "Loading quarantine status"
+              : ""
+          }
+        />
+      </MetricGrid>
+
+      {(quarantineLoading || quarantineError || quarantineContext?.canView) && (
+        <Card>
+          <CardHeader>
+            <CardTitle>
+              Agent Quarantine Controls
+              {!quarantineLoading && quarantineContext && (
+                <span className="ml-2 text-sm font-normal text-muted-foreground">
+                  ({quarantinedAgentsCount} quarantined)
+                </span>
+              )}
+            </CardTitle>
+            <CardDescription>
+              Live quarantine status from Power Platform.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {!canManageAccess && controlsDisabledReason ? (
+              <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-100">
+                {controlsDisabledReason}
+              </div>
+            ) : null}
+            {quarantineLoading ? (
+              <p className="text-sm text-muted-foreground">Loading...</p>
+            ) : quarantineError ? (
+              <DvErrorBanner errorType="unknown" rawError={quarantineError} />
+            ) : quarantineContext && !quarantineContext.canAct ? (
+              <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-100">
+                {quarantineContext.needsConsent
+                  ? "Power Platform delegated consent is required before block and unblock actions can run."
+                  : "Your current session does not include the required Power Platform delegated scope for quarantine actions."}
+              </div>
+            ) : null}
+            {quarantineContext && quarantineContext.agents.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No agents found in the mapping table.</p>
+            ) : quarantineContext ? (
+              <div className="max-h-[460px] overflow-x-auto overflow-y-auto">
+                <Table>
+                  <TableHeader className="sticky top-0 bg-background">
+                    <TableRow>
+                      <TableHead>Bot Name</TableHead>
+                      <TableHead>Last Modified</TableHead>
+                      <TableHead>Current State</TableHead>
+                      <TableHead className="w-28">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {quarantineContext.agents.map((agent) => (
+                      <TableRow key={agent.botId}>
+                        <TableCell>
+                          <div className="font-medium">{agent.botName}</div>
+                        </TableCell>
+                        <TableCell className="text-muted-foreground">
+                          <LocalDateTime value={agent.lastUpdateTimeUtc} fallback="—" />
+                        </TableCell>
+                        <TableCell>
+                          <span className={agent.isQuarantined ? "font-medium text-red-600 dark:text-red-400" : "font-medium text-green-700 dark:text-green-400"}>
+                            {agent.state}
+                          </span>
+                          {agent.error ? (
+                            <div className="text-xs text-muted-foreground">{agent.error}</div>
+                          ) : null}
+                        </TableCell>
+                        <TableCell>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={!canManageAccess || !quarantineContext.canAct || quarantineSubmittingBotId === agent.botId || Boolean(agent.error)}
+                            onClick={() => handleQuarantineAction(agent)}
+                          >
+                            {quarantineSubmittingBotId === agent.botId ? `${agent.actionLabel}ing...` : agent.actionLabel}
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            ) : null}
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader className="gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <CardTitle>
-              Agent Access Records
+              Agent IAM Assignments
               {!dvLoading && !dvError && (
                 <span className="ml-2 text-sm font-normal text-muted-foreground">
                   ({sortedRows.length} row{sortedRows.length !== 1 ? "s" : ""})
                 </span>
               )}
             </CardTitle>
-            <CardDescription>All agent-user assignments from Dataverse</CardDescription>
+            <CardDescription>All agent-user assignments used by access management.</CardDescription>
           </div>
         </CardHeader>
         <CardContent>
@@ -381,7 +603,7 @@ export default function DataverseTableClient({
           ) : sortedRows.length === 0 ? (
             <p className="text-sm text-muted-foreground">No rows found.</p>
           ) : (
-            <div className="max-h-[600px] overflow-x-auto overflow-y-auto">
+            <div className="max-h-[640px] overflow-x-auto overflow-y-auto">
               <Table>
                 <TableHeader className="sticky top-0 bg-background">
                   <TableRow>
@@ -435,22 +657,18 @@ export default function DataverseTableClient({
       <Card>
         <CardHeader>
           <CardTitle>Block User from Agent</CardTitle>
-          <CardDescription>Update the Dataverse access record for a specific agent-user assignment</CardDescription>
+          <CardDescription>Update agent-user assignments</CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-4">
           {!canManageAccess && controlsDisabledReason && (
-            <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-100">
+            <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-100">
               {controlsDisabledReason}
             </div>
           )}
-          {blockError && (
-            <div className="mb-4">
-              <DvErrorBanner errorType={blockErrorType} rawError={blockError} />
-            </div>
-          )}
-          <div className="flex flex-wrap items-end gap-3">
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-medium text-muted-foreground">Agent</label>
+          {blockError && <DvErrorBanner errorType={blockErrorType} rawError={blockError} />}
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] lg:items-end">
+            <div className="min-w-0 space-y-1.5">
+              <label className="block text-xs font-medium uppercase tracking-wide text-muted-foreground">Agent</label>
               <select
                 value={selectedAgent}
                 onChange={(e) => { setSelectedAgent(e.target.value); setSelectedUser(""); }}
@@ -464,12 +682,8 @@ export default function DataverseTableClient({
               </select>
             </div>
 
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-medium text-muted-foreground">
-                User{selectedAgent && dvUsersForAgent.length === 0 && (
-                  <span className="ml-1 text-amber-600">(no users found for this agent)</span>
-                )}
-              </label>
+            <div className="min-w-0 space-y-1.5">
+              <label className="block text-xs font-medium uppercase tracking-wide text-muted-foreground">User</label>
               <select
                 value={selectedUser}
                 onChange={(e) => setSelectedUser(e.target.value)}
@@ -483,92 +697,87 @@ export default function DataverseTableClient({
               </select>
             </div>
 
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-medium text-muted-foreground">
-                Reason <span className="text-red-500">*</span>
-              </label>
-              <input
-                type="text"
-                placeholder="e.g. Security concern, Policy violation..."
-                value={blockReason}
-                onChange={(e) => setBlockReason(e.target.value)}
-                className={inputClass + " w-64"}
-                disabled={!canManageAccess || submitting}
-              />
+            <div className="flex min-w-0 flex-col gap-1.5 lg:min-w-[180px]">
+              <span className="block text-xs font-medium uppercase tracking-wide text-transparent select-none">
+                Action
+              </span>
+              <Button
+                variant="outline"
+                disabled={!canManageAccess || !formReady}
+                onClick={handleBlock}
+                className="h-10 w-full border-red-300 text-red-700 hover:bg-red-50 dark:border-red-700 dark:text-red-400 dark:hover:bg-red-900/20"
+              >
+                {submitting ? "Blocking..." : "Block from Agent"}
+              </Button>
             </div>
-
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={!canManageAccess || !formReady}
-              onClick={handleBlock}
-              className="border-red-300 text-red-700 hover:bg-red-50 dark:border-red-700 dark:text-red-400 dark:hover:bg-red-900/20"
-            >
-              {submitting ? "Blocking..." : "Block from Agent"}
-            </Button>
           </div>
         </CardContent>
       </Card>
 
-      {!dvLoading && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Active Blocks</CardTitle>
-            <CardDescription>Derived from Dataverse rows where the disable flag is true</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {activeBlocks.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No active blocks.</p>
-            ) : (
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>User</TableHead>
-                      <TableHead>Agent</TableHead>
-                      <TableHead>Reason</TableHead>
-                      <TableHead>Blocked By</TableHead>
-                      <TableHead>System Modified By</TableHead>
-                      <TableHead>Blocked At</TableHead>
-                      <TableHead className="w-24">Action</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {activeBlocks.map((block) => (
-                      <TableRow key={block.id}>
-                        <TableCell>
-                          <span className="font-medium">
-                            {block.user_principal_name || block.user_display_name || block.user_id}
-                          </span>
-                        </TableCell>
-                        <TableCell>{block.bot_name || block.bot_id}</TableCell>
-                        <TableCell className="max-w-[160px] truncate text-muted-foreground" title={block.block_reason || ""}>
-                          {block.block_reason || <span className="text-muted-foreground/50">—</span>}
-                        </TableCell>
-                        <TableCell className="text-muted-foreground">{block.blocked_by}</TableCell>
-                        <TableCell className="text-muted-foreground">{block.system_modified_by}</TableCell>
-                        <TableCell className="text-muted-foreground">
-                          <LocalDateTime value={block.blocked_at} fallback="—" />
-                        </TableCell>
-                        <TableCell>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            disabled={!canManageAccess || submitting}
-                            onClick={() => handleUnblock(block)}
-                          >
-                            Unblock
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
+      <Card>
+        <CardHeader>
+          <CardTitle>
+            Active Blocks
+            {!dvLoading && (
+              <span className="ml-2 text-sm font-normal text-muted-foreground">
+                ({activeBlocks.length} active)
+              </span>
             )}
-          </CardContent>
-        </Card>
-      )}
+          </CardTitle>
+          <CardDescription>Current agent-level user blocks derived from Dataverse.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {dvLoading ? (
+            <p className="text-sm text-muted-foreground">Loading...</p>
+          ) : activeBlocks.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No active blocks.</p>
+          ) : (
+            <div className="max-h-[420px] overflow-x-auto overflow-y-auto">
+              <Table>
+                <TableHeader className="sticky top-0 bg-background">
+                  <TableRow>
+                    <TableHead>User</TableHead>
+                    <TableHead>Agent</TableHead>
+                    <TableHead>Reason</TableHead>
+                    <TableHead>Blocked By</TableHead>
+                    <TableHead>Blocked At</TableHead>
+                    <TableHead className="w-24">Action</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {activeBlocks.map((block) => (
+                    <TableRow key={block.id}>
+                      <TableCell>
+                        <span className="font-medium">
+                          {block.user_principal_name || block.user_display_name || block.user_id}
+                        </span>
+                      </TableCell>
+                      <TableCell>{block.bot_name || block.bot_id}</TableCell>
+                      <TableCell className="max-w-[180px] truncate text-muted-foreground" title={block.block_reason || ""}>
+                        {block.block_reason || <span className="text-muted-foreground/50">—</span>}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">{block.blocked_by}</TableCell>
+                      <TableCell className="text-muted-foreground">
+                        <LocalDateTime value={block.blocked_at} fallback="—" />
+                      </TableCell>
+                      <TableCell>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={!canManageAccess || submitting}
+                          onClick={() => handleUnblock(block)}
+                        >
+                          Unblock
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {modal && (
         <ConfirmModal

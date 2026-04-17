@@ -2,6 +2,7 @@ import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 
 import { shouldUseSecureAuthCookies } from "./auth-cookies";
+import { getBootScopedAuthSecret } from "./auth-secret";
 import {
   CSRF_FORM_FIELD_NAME,
   CSRF_HEADER_NAME,
@@ -17,11 +18,7 @@ type CsrfValidationResult =
   | { ok: false; error: "missing_csrf_token" | "invalid_csrf_token" };
 
 function getCsrfSecret() {
-  const secret = process.env.CSRF_SECRET || process.env.NEXTAUTH_SECRET;
-  if (!secret) {
-    throw new Error("CSRF_SECRET or NEXTAUTH_SECRET must be set");
-  }
-  return secret;
+  return process.env.CSRF_SECRET || getBootScopedAuthSecret();
 }
 
 export function getCsrfCookieName() {

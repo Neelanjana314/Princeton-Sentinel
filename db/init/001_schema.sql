@@ -315,6 +315,29 @@ ON agent_access_revoke_log (bot_id, occurred_at DESC);
 CREATE INDEX IF NOT EXISTS idx_agent_access_revoke_log_user
 ON agent_access_revoke_log (user_id, occurred_at DESC);
 
+CREATE TABLE IF NOT EXISTS agent_quarantine_log (
+    id                          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    occurred_at                 TIMESTAMPTZ NOT NULL DEFAULT now(),
+    action                      TEXT NOT NULL,
+    request_status              TEXT NOT NULL,
+    actor_oid                   TEXT,
+    actor_upn                   TEXT,
+    actor_name                  TEXT,
+    bot_id                      TEXT NOT NULL,
+    bot_name                    TEXT,
+    reason                      TEXT,
+    resulting_is_quarantined    BOOLEAN,
+    result_last_update_time_utc TIMESTAMPTZ,
+    error_detail                TEXT,
+    details                     JSONB
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_quarantine_log_occurred
+ON agent_quarantine_log (occurred_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_agent_quarantine_log_bot
+ON agent_quarantine_log (bot_id, occurred_at DESC);
+
 -- Copilot agent access control
 CREATE TABLE IF NOT EXISTS copilot_access_blocks (
     id                  BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -513,6 +536,10 @@ FOR EACH ROW EXECUTE FUNCTION touch_table_update_log();
 
 CREATE TRIGGER trg_touch_local_testing_state
 AFTER INSERT OR UPDATE OR DELETE ON local_testing_state
+FOR EACH ROW EXECUTE FUNCTION touch_table_update_log();
+
+CREATE TRIGGER trg_touch_agent_quarantine_log
+AFTER INSERT OR UPDATE OR DELETE ON agent_quarantine_log
 FOR EACH ROW EXECUTE FUNCTION touch_table_update_log();
 
 CREATE TRIGGER trg_notify_feature_flags_state

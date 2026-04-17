@@ -55,6 +55,7 @@ Current behavior:
   - `ENTRA_TENANT_ID`
   - `ENTRA_CLIENT_ID`
   - `ENTRA_CLIENT_SECRET`
+- the web app generates a boot-scoped auth secret automatically on each server boot
 - authorization is group-based:
   - `ADMIN_GROUP_ID`
   - `USER_GROUP_ID`
@@ -234,6 +235,10 @@ These routes are admin-only and authenticate to the worker with `WORKER_INTERNAL
   alias/export of the access-control route
 - `GET|POST /api/agents/access-blocks`
   higher-level block/unblock, disable/enable, and register-agent operations
+- `GET /api/copilot-quarantine/context`
+- `POST /api/copilot-quarantine/quarantine`
+- `POST /api/copilot-quarantine/unquarantine`
+  delegated Power Platform quarantine state and action routes for the agent access-control page
 
 ### Export APIs
 
@@ -283,7 +288,6 @@ Common web-relevant variables:
 - required:
   - `DATABASE_URL`
   - `NEXTAUTH_URL`
-  - `NEXTAUTH_SECRET`
   - `ENTRA_TENANT_ID`
   - `ENTRA_CLIENT_ID`
   - `ENTRA_CLIENT_SECRET`
@@ -296,6 +300,11 @@ Common web-relevant variables:
   - `CSRF_SECRET`
   - `INTERNAL_EMAIL_DOMAINS`
   - `DASHBOARD_DORMANT_LOOKBACK_DAYS`
+  - `DATAVERSE_BASE_URL`
+  - `DATAVERSE_TABLE_URL`
+  - `DATAVERSE_COLUMN_PREFIX`
+  - `POWER_PLATFORM_ENVIRONMENT_ID`
+  - `DATAVERSE_AGENT_SECURITY_GROUP_MAPPING_TABLE_URL`
   - `LICENSE_PUBLIC_KEY_PATH`
   - `LICENSE_CACHE_TTL_SECONDS`
   - `LOCAL_DOCKER_DEPLOYMENT`

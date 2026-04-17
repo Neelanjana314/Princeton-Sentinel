@@ -9,6 +9,7 @@ const tabs = [
   { label: "Analytics", href: "/admin/analytics" },
   { label: "Revoke Activity", href: "/admin/revoke-activity" },
   { label: "Agent Access", href: "/admin/agent-access-logs" },
+  { label: "Agent Quarantine", href: "/admin/agent-quarantine" },
   { label: "Jobs", href: "/admin/jobs" },
   { label: "Runs", href: "/admin/runs" },
   { label: "Admin", href: "/admin" },

@@ -135,7 +135,6 @@ export default function DataverseTableClient({ columnPrefix }: { columnPrefix: s
   const [blockErrorType, setBlockErrorType] = React.useState<string | null>(null);
   const [selectedAgent, setSelectedAgent] = React.useState("");
   const [selectedUser, setSelectedUser] = React.useState("");
-  const [blockReason, setBlockReason] = React.useState("");
   const [modal, setModal] = React.useState<{
     title: string;
     description: string;
@@ -228,7 +227,7 @@ export default function DataverseTableClient({ columnPrefix }: { columnPrefix: s
     setModal({
       title: "Confirm Block",
       description: `Block "${selectedUser}" from "${selectedAgent}"?`,
-      reason: blockReason,
+      reason: "",
       onConfirm: (reason) => executeBlock(reason),
     });
   }
@@ -264,7 +263,6 @@ export default function DataverseTableClient({ columnPrefix }: { columnPrefix: s
         setRows((prev) => patchDvState(prev, dvRow?.[cols.id], true, trimmedReason, cols));
         setSelectedUser("");
         setSelectedAgent("");
-        setBlockReason("");
         await fetchDv();
       }
     } catch {
@@ -319,8 +317,7 @@ export default function DataverseTableClient({ columnPrefix }: { columnPrefix: s
   }
 
   const selectClass = "rounded-md border border-input bg-background px-3 py-1.5 text-sm";
-  const inputClass = "rounded-md border border-input bg-background px-3 py-1.5 text-sm";
-  const formReady = selectedUser && selectedAgent && blockReason.trim() && !submitting;
+  const formReady = selectedUser && selectedAgent && !submitting;
 
   return (
     <main className="mx-auto max-w-[1400px] space-y-4 px-4 py-6">
@@ -455,20 +452,6 @@ export default function DataverseTableClient({ columnPrefix }: { columnPrefix: s
                   <option key={name} value={name}>{name}</option>
                 ))}
               </select>
-            </div>
-
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-medium text-muted-foreground">
-                Reason <span className="text-red-500">*</span>
-              </label>
-              <input
-                type="text"
-                placeholder="e.g. Security concern, Policy violation..."
-                value={blockReason}
-                onChange={(e) => setBlockReason(e.target.value)}
-                className={inputClass + " w-64"}
-                disabled={submitting}
-              />
             </div>
 
             <Button

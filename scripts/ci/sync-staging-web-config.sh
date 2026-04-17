@@ -17,7 +17,6 @@ az containerapp secret set \
   --secrets \
     dburl="${STG_DATABASE_URL}" \
     entrasecret="${STG_ENTRA_CLIENT_SECRET}" \
-    nextauthsecret="${STG_NEXTAUTH_SECRET}" \
     workerinternaltoken="${STG_WORKER_INTERNAL_API_TOKEN}" \
     workerheartbeattoken="${STG_WORKER_HEARTBEAT_TOKEN}"
 
@@ -28,13 +27,14 @@ az containerapp update \
     APP_VERSION="${APP_VERSION}" \
     DATABASE_URL=secretref:dburl \
     DATAVERSE_BASE_URL="${STG_DATAVERSE_BASE_URL}" \
+    POWER_PLATFORM_ENVIRONMENT_ID="${STG_POWER_PLATFORM_ENVIRONMENT_ID}" \
     DATAVERSE_TABLE_URL="${STG_DATAVERSE_TABLE_URL}" \
     DATAVERSE_COLUMN_PREFIX="${STG_DATAVERSE_COLUMN_PREFIX}" \
+    DATAVERSE_AGENT_SECURITY_GROUP_MAPPING_TABLE_URL="${STG_DATAVERSE_AGENT_SECURITY_GROUP_MAPPING_TABLE_URL}" \
     WORKER_API_URL="${WORKER_API_URL}" \
     WORKER_INTERNAL_API_TOKEN=secretref:workerinternaltoken \
     WORKER_HEARTBEAT_TOKEN=secretref:workerheartbeattoken \
     NEXTAUTH_URL="${NEXTAUTH_URL}" \
-    NEXTAUTH_SECRET=secretref:nextauthsecret \
     ENTRA_TENANT_ID="${STG_ENTRA_TENANT_ID}" \
     ENTRA_CLIENT_ID="${STG_ENTRA_CLIENT_ID}" \
     ENTRA_CLIENT_SECRET=secretref:entrasecret \

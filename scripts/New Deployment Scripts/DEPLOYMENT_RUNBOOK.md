@@ -163,7 +163,6 @@ Prompts for:
 
 Generated automatically unless you override them:
 
-- `NEXTAUTH_SECRET`
 - `WORKER_INTERNAL_API_TOKEN`
 - `WORKER_HEARTBEAT_TOKEN`
 
@@ -202,6 +201,7 @@ Run:
 Behavior:
 
 - reuses the staging config sync logic
+- the web app generates a fresh boot-scoped auth secret on every startup, invalidating prior sessions after restart or redeploy
 - mounts the local license public key into the web Container App as a secret volume
 - updates ingress to the real web port `3000`
 - points the web Container App at the newly built ACR image

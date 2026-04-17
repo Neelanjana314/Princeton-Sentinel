@@ -4,6 +4,11 @@
 
 Interactive local deployment suite for provisioning a client Azure environment, bootstrapping the database, deploying web and worker images, installing a license, and writing a plaintext deployment record under `.local/deployments/`.
 
+The runtime-capture phase records the shared Dataverse web settings used by staging deployment as well:
+
+- required Dataverse app settings: `DATAVERSE_BASE_URL`, `DATAVERSE_TABLE_URL`, `DATAVERSE_COLUMN_PREFIX`
+- optional Copilot quarantine settings: `POWER_PLATFORM_ENVIRONMENT_ID`, `DATAVERSE_AGENT_SECURITY_GROUP_MAPPING_TABLE_URL`
+
 The suite uses a client-tenant ACR wired with Container App managed identity plus `AcrPull`.
 
 During init, you can either:
