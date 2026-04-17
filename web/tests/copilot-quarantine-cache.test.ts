@@ -187,7 +187,7 @@ test("transient graph role check failures are not cached across retries", async 
     assert.equal(second.allowed, true);
     assert.deepEqual(second.matchedRoles, ["Power Platform Administrator"]);
     assert.equal(second.error, null);
-    assert.equal(tokenRequests, 2);
+    assert.equal(tokenRequests, 1);
     assert.equal(roleRequests, 2);
   } finally {
     global.fetch = originalFetch;

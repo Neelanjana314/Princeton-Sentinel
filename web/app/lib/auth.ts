@@ -29,8 +29,6 @@ const AUTHORIZATION_SCOPES = [
   "profile",
   "email",
   "offline_access",
-  "https://graph.microsoft.com/Directory.Read.All",
-  "https://api.powerplatform.com/CopilotStudio.AdminActions.Invoke",
 ];
 
 const TOKEN_EXCHANGE_SCOPES = [
@@ -38,7 +36,6 @@ const TOKEN_EXCHANGE_SCOPES = [
   "profile",
   "email",
   "offline_access",
-  "https://graph.microsoft.com/Directory.Read.All",
 ];
 
 function decodeJwtPayload(token?: string): Record<string, any> | null {

@@ -33,8 +33,8 @@ test("getAuthOptions configures Azure AD with PKCE", () => {
   assert.equal((provider as any)?.options?.idToken, true);
   assert.equal((provider as any)?.options?.authorization?.params?.response_mode, undefined);
   assert.match((provider as any)?.options?.authorization?.params?.scope, /offline_access/);
-  assert.match((provider as any)?.options?.authorization?.params?.scope, /Directory\.Read\.All/);
-  assert.match((provider as any)?.options?.authorization?.params?.scope, /CopilotStudio\.AdminActions\.Invoke/);
+  assert.doesNotMatch((provider as any)?.options?.authorization?.params?.scope, /Directory\.Read\.All/);
+  assert.doesNotMatch((provider as any)?.options?.authorization?.params?.scope, /CopilotStudio\.AdminActions\.Invoke/);
 });
 
 test("getAuthOptions uses the boot-scoped auth secret", () => {
@@ -52,7 +52,7 @@ test("getAuthOptions uses the boot-scoped auth secret", () => {
   }
 });
 
-test("getAuthOptions redeems Azure auth codes with a single-resource Graph scope", async () => {
+test("getAuthOptions redeems Azure auth codes with baseline OIDC scopes", async () => {
   const options = getAuthOptions();
   const provider = options.providers?.[0] as any;
   const request = provider?.options?.token?.request;
@@ -80,7 +80,7 @@ test("getAuthOptions redeems Azure auth codes with a single-resource Graph scope
           id_token: "provider-id-token",
           refresh_token: "provider-refresh-token",
           expires_at: Math.floor(Date.now() / 1000) + 3600,
-          scope: "openid profile email offline_access https://graph.microsoft.com/Directory.Read.All",
+          scope: "openid profile email offline_access",
         };
       },
     },
@@ -89,7 +89,7 @@ test("getAuthOptions redeems Azure auth codes with a single-resource Graph scope
   assert.equal(callbackCalls.length, 1);
   assert.deepEqual(callbackCalls[0][3], {
     exchangeBody: {
-      scope: "openid profile email offline_access https://graph.microsoft.com/Directory.Read.All",
+      scope: "openid profile email offline_access",
     },
   });
   assert.equal(result.tokens.access_token, "provider-access-token");

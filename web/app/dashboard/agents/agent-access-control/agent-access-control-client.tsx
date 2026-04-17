@@ -180,6 +180,13 @@ export default function DataverseTableClient({
   const [quarantineLoading, setQuarantineLoading] = React.useState(true);
   const [quarantineError, setQuarantineError] = React.useState<string | null>(null);
   const [quarantineSubmittingBotId, setQuarantineSubmittingBotId] = React.useState<string | null>(null);
+  const adminConsentHref = React.useMemo(() => {
+    if (typeof window === "undefined") {
+      return "/api/auth/admin-consent?callbackUrl=%2Fdashboard%2Fagents%2Fagent-access-control";
+    }
+    const callbackUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    return `/api/auth/admin-consent?callbackUrl=${encodeURIComponent(callbackUrl)}`;
+  }, []);
   const [modal, setModal] = React.useState<{
     title: string;
     description: string;
@@ -526,9 +533,18 @@ export default function DataverseTableClient({
               <DvErrorBanner errorType="unknown" rawError={quarantineError} />
             ) : quarantineContext && !quarantineContext.canAct ? (
               <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-100">
-                {quarantineContext.needsConsent
-                  ? "Power Platform delegated consent is required before block and unblock actions can run."
-                  : "Your current session does not include the required Power Platform delegated scope for quarantine actions."}
+                <div className="space-y-3">
+                  <p>
+                    {quarantineContext.needsConsent
+                      ? "Additional permissions are required before Agent Quarantine Controls can run."
+                      : "Your current session does not include the required delegated permissions for quarantine actions."}
+                  </p>
+                  {quarantineContext.needsConsent ? (
+                    <Button asChild size="sm" variant="outline">
+                      <a href={adminConsentHref}>Review and grant permissions</a>
+                    </Button>
+                  ) : null}
+                </div>
               </div>
             ) : null}
             {quarantineContext && quarantineContext.agents.length === 0 ? (

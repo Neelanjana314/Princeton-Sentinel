@@ -1185,16 +1185,18 @@ def ensure_postgres_extensions_allowed(state: dict[str, Any], *, io: BaseIO, dry
 def print_entra_checklist(state: dict[str, Any], *, io: BaseIO) -> None:
     azure = state["azure"]
     callback_url = f"https://{azure.get('web_fqdn')}/api/auth/callback/azure-ad"
+    admin_consent_callback_url = f"https://{azure.get('web_fqdn')}/api/auth/admin-consent/callback"
     lines = [
         "",
         "Manual Entra portal checklist",
         f"1. Create or reuse one Entra app registration for {state['client_name']}.",
         f"2. Add the web redirect URI: {callback_url}",
-        "3. Configure the `groups` claim for ID tokens.",
-        "4. Add the Graph application permissions listed in README.md and grant admin consent.",
-        "5. Create a client secret for the app registration.",
-        "6. Identify the admin-group object ID and user-group object ID for the tenant.",
-        "7. Record the tenant ID, client ID, client secret, admin group ID, and user group ID for phase 05.",
+        f"3. Add the admin-consent redirect URI: {admin_consent_callback_url}",
+        "4. Configure the `groups` claim for ID tokens.",
+        "5. Add the Graph application permissions listed in README.md and grant admin consent.",
+        "6. Create a client secret for the app registration.",
+        "7. Identify the admin-group object ID and user-group object ID for the tenant.",
+        "8. Record the tenant ID, client ID, client secret, admin group ID, and user group ID for phase 05.",
         "",
     ]
     io.print("\n".join(lines))

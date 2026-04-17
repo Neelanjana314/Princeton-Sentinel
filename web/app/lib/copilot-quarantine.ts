@@ -23,6 +23,13 @@ type CachedRoleCheck = RoleCheckResult & {
   authStateUpdatedAt: number | null;
 };
 
+type CachedDelegatedToken = PowerPlatformTokenResult & {
+  cacheKey: string;
+  cachedAtMs: number;
+  authStateUpdatedAt: number | null;
+  expiresAtMs: number | null;
+};
+
 type CachedEnvironment = {
   dataverseBaseUrl: string;
   environmentId: string;
@@ -65,6 +72,7 @@ export type CopilotQuarantineAgentRow = {
 
 let roleCache = new Map<string, CachedRoleCheck>();
 let environmentCache = new Map<string, CachedEnvironment>();
+let delegatedTokenCache = new Map<string, CachedDelegatedToken>();
 
 function getEntraConfig() {
   const tenantId = process.env.ENTRA_TENANT_ID?.trim() || "";
@@ -138,6 +146,77 @@ function getTokenScopes(accessToken: string | null | undefined): string[] {
     .filter(Boolean);
 }
 
+function getTokenExpiresAt(accessToken: string | null | undefined): number | null {
+  const payload = parseJwtPayload(accessToken);
+  return typeof payload?.exp === "number" ? payload.exp * 1000 : null;
+}
+
+function normalizeScopes(scopes: string[]) {
+  return scopes
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .sort()
+    .join(" ");
+}
+
+function buildDelegatedTokenCacheKey(session: Session | any, scopes: string[]) {
+  const identity = getSessionIdentity(session);
+  const baseKey = getDelegatedAuthState(identity.oid, identity.upn)?.key;
+  if (!baseKey) {
+    return null;
+  }
+  return `${baseKey}|scopes:${normalizeScopes(scopes)}`;
+}
+
+function readDelegatedTokenCache(session: Session | any, scopes: string[]): CachedDelegatedToken | null {
+  const cacheKey = buildDelegatedTokenCacheKey(session, scopes);
+  if (!cacheKey) {
+    return null;
+  }
+
+  const cached = delegatedTokenCache.get(cacheKey);
+  if (!cached) {
+    return null;
+  }
+
+  if (cached.authStateUpdatedAt !== getAuthStateUpdatedAt(session)) {
+    delegatedTokenCache.delete(cacheKey);
+    return null;
+  }
+
+  if (cached.expiresAtMs && cached.expiresAtMs - Date.now() <= 60_000) {
+    delegatedTokenCache.delete(cacheKey);
+    return null;
+  }
+
+  if (!cached.accessToken && Date.now() - cached.cachedAtMs > 5 * 60 * 1000) {
+    delegatedTokenCache.delete(cacheKey);
+    return null;
+  }
+
+  return cached;
+}
+
+function writeDelegatedTokenCache(
+  session: Session | any,
+  scopes: string[],
+  result: PowerPlatformTokenResult,
+  expiresAtMs?: number | null
+) {
+  const cacheKey = buildDelegatedTokenCacheKey(session, scopes);
+  if (!cacheKey) {
+    return;
+  }
+
+  delegatedTokenCache.set(cacheKey, {
+    ...result,
+    cacheKey,
+    cachedAtMs: Date.now(),
+    authStateUpdatedAt: getAuthStateUpdatedAt(session),
+    expiresAtMs: expiresAtMs ?? getTokenExpiresAt(result.accessToken),
+  });
+}
+
 async function refreshAccessToken(refreshToken: string, scopes: string[]): Promise<PowerPlatformTokenResult> {
   const { tenantId, clientId, clientSecret } = getEntraConfig();
   const body = new URLSearchParams({
@@ -204,10 +283,22 @@ async function refreshAccessToken(refreshToken: string, scopes: string[]): Promi
 }
 
 async function getDelegatedAccessToken(session: Session | any, scopes: string[]): Promise<PowerPlatformTokenResult> {
+  const cached = readDelegatedTokenCache(session, scopes);
+  if (cached) {
+    return {
+      accessToken: cached.accessToken,
+      refreshToken: cached.refreshToken,
+      scopes: cached.scopes,
+      needsConsent: cached.needsConsent,
+    };
+  }
+
   const identity = getSessionIdentity(session);
   const state = getDelegatedAuthState(identity.oid, identity.upn);
   if (!state?.refreshToken) {
-    return { accessToken: "", refreshToken: null, scopes: [], needsConsent: true };
+    const result = { accessToken: "", refreshToken: null, scopes: [], needsConsent: true };
+    writeDelegatedTokenCache(session, scopes, result, null);
+    return result;
   }
 
   const result = await refreshAccessToken(state.refreshToken, scopes);
@@ -223,6 +314,9 @@ async function getDelegatedAccessToken(session: Session | any, scopes: string[])
       refreshToken: result.refreshToken ?? state.refreshToken,
       scope: result.scopes.join(" "),
     });
+    writeDelegatedTokenCache(session, scopes, result, expiresAt);
+  } else {
+    writeDelegatedTokenCache(session, scopes, result, null);
   }
   return result;
 }
@@ -556,10 +650,11 @@ export async function fetchCopilotQuarantineStatus(
 export async function fetchCopilotQuarantineContext(session: Session | any) {
   const roleCheck = await evaluateCopilotQuarantineRoles(session);
   if (!roleCheck.allowed) {
+    const needsConsent = roleCheck.error === "graph_consent_required";
     return {
-      canView: false,
+      canView: needsConsent,
       canAct: false,
-      needsConsent: false,
+      needsConsent,
       hasRequiredScope: false,
       roleCheck,
       agents: [],
@@ -622,6 +717,30 @@ export async function fetchCopilotQuarantineContext(session: Session | any) {
   };
 }
 
+export async function warmCopilotQuarantineAuth(session: Session | any) {
+  const roleCheck = await evaluateCopilotQuarantineRoles(session);
+  if (!roleCheck.allowed) {
+    return {
+      isEligibleAdmin: false,
+      canView: false,
+      canAct: false,
+      needsConsent: roleCheck.error === "graph_consent_required",
+      hasRequiredScope: false,
+      roleCheck,
+    };
+  }
+
+  const powerPlatform = await getPowerPlatformContext(session);
+  return {
+    isEligibleAdmin: true,
+    canView: true,
+    canAct: powerPlatform.hasRequiredScope,
+    needsConsent: powerPlatform.needsConsent,
+    hasRequiredScope: powerPlatform.hasRequiredScope,
+    roleCheck,
+  };
+}
+
 export async function toggleCopilotQuarantine(
   session: Session | any,
   action: "quarantine" | "unquarantine",
@@ -658,4 +777,5 @@ export async function toggleCopilotQuarantine(
 export function resetCopilotQuarantineCachesForTests() {
   roleCache = new Map<string, CachedRoleCheck>();
   environmentCache = new Map<string, CachedEnvironment>();
+  delegatedTokenCache = new Map<string, CachedDelegatedToken>();
 }

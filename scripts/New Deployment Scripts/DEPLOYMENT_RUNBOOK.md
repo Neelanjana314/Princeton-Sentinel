@@ -128,11 +128,12 @@ Manual portal tasks:
 
 1. Create or reuse one Entra app registration for the client.
 2. Add the redirect URI `https://<web-fqdn>/api/auth/callback/azure-ad`.
-3. Configure the `groups` claim for ID tokens.
-4. Add the Graph application permissions listed in [README.md](/Users/garrick-mac/Documents/GitHub/Princeton-Sentinel/README.md).
-5. Grant admin consent.
-6. Create a client secret.
-7. Collect:
+3. Add the redirect URI `https://<web-fqdn>/api/auth/admin-consent/callback`.
+4. Configure the `groups` claim for ID tokens.
+5. Add the Graph application permissions listed in [README.md](/Users/garrick-mac/Documents/GitHub/Princeton-Sentinel/README.md).
+6. Grant admin consent.
+7. Create a client secret.
+8. Collect:
    - tenant ID
    - client ID
    - client secret

@@ -106,13 +106,16 @@ The shared app registration needs these Microsoft Graph application permissions 
 
 #### Delegated user scopes
 
-The web sign-in flow now requests delegated scopes needed by the quarantine feature:
+The baseline web sign-in flow requests only standard OIDC scopes plus refresh access:
 
 - `openid`
 - `profile`
 - `email`
 - `offline_access`
   Required so the web server can retain refresh capability for later delegated Graph and Power Platform calls.
+
+Admin-only quarantine flows require additional delegated consent beyond baseline sign-in:
+
 - `https://graph.microsoft.com/Directory.Read.All`
   Required for the signed-in admin role check against `me/transitiveMemberOf/microsoft.graph.directoryRole`.
 - `https://api.powerplatform.com/CopilotStudio.AdminActions.Invoke`
