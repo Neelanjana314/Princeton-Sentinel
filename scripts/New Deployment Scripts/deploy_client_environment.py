@@ -57,6 +57,7 @@ from deployment_lib import (  # noqa: E402
     utc_now_iso,
     validate_ipv4,
     validate_non_empty,
+    validate_resource_group_name,
     write_temp_sql,
 )
 PHASES = {
@@ -218,6 +219,28 @@ def ensure_app_insights_extension(*, dry_run: bool, io: BaseIO) -> None:
 
 def ensure_resource_group(state: dict[str, Any], *, dry_run: bool, io: BaseIO) -> None:
     azure = state["azure"]
+    mode = azure.get("resource_group_provisioning_mode") or "create"
+    if mode == "existing":
+        command = [
+            "az",
+            "group",
+            "show",
+            "--name",
+            azure["resource_group"],
+            "--query",
+            "name",
+            "-o",
+            "tsv",
+        ]
+        if dry_run:
+            run_command(command, dry_run=True, io=io)
+            return
+        existing = run_and_capture_or_default(command, io=io, default="").strip()
+        if not existing:
+            raise DeploymentError(f"Resource group does not exist: {azure['resource_group']}")
+        return
+    if mode != "create":
+        raise DeploymentError(f"Unsupported resource group provisioning mode: {mode}")
     run_command(
         [
             "az",
@@ -1625,6 +1648,20 @@ def phase_init(args, io: BaseIO) -> dict[str, Any]:
     client_name = io.prompt("Client name", validator=validate_non_empty)
     subscription = io.prompt("Azure subscription ID or name", validator=validate_non_empty)
     location = io.prompt("Azure location", default="eastus", validator=validate_non_empty)
+    use_existing_resource_group = io.confirm("Deploy into an existing Azure resource group?", default=False)
+    if use_existing_resource_group:
+        resource_group = io.prompt("Existing Azure resource group name", validator=validate_resource_group_name)
+        resource_group_provisioning_mode = "existing"
+    else:
+        client_slug = normalize_resource_name(client_name, max_length=18)
+        name_stem = normalize_resource_name(f"ps-{client_slug}", max_length=20)
+        suggested_resource_group = f"rg-{name_stem}"
+        resource_group = io.prompt(
+            "New Azure resource group name",
+            default=suggested_resource_group,
+            validator=validate_resource_group_name,
+        )
+        resource_group_provisioning_mode = "create"
     use_existing_acr = io.confirm("Use an existing ACR in the client's tenant?", default=True)
     if use_existing_acr:
         acr_name = io.prompt("Existing Azure Container Registry name", validator=validate_non_empty)
@@ -1641,6 +1678,8 @@ def phase_init(args, io: BaseIO) -> dict[str, Any]:
         subscription,
         location,
         acr_name,
+        resource_group=resource_group,
+        resource_group_provisioning_mode=resource_group_provisioning_mode,
         acr_access_mode="managed-identity",
         acr_provisioning_mode=acr_provisioning_mode,
         acr_sku=acr_sku,

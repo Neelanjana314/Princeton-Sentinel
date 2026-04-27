@@ -86,6 +86,13 @@ class DeployClientEnvironmentTests(unittest.TestCase):
         self.assertEqual(deployment_lib.normalize_acr_name("Client ACR!!"), "clientacr")
         self.assertEqual(deployment_lib.normalize_acr_name("123"), "a1230")
 
+    def test_resource_group_name_validation_allows_existing_azure_names(self):
+        self.assertEqual(deployment_lib.validate_resource_group_name("rg.prod_(client_1)"), "rg.prod_(client_1)")
+        with self.assertRaisesRegex(ValueError, "unsupported characters"):
+            deployment_lib.validate_resource_group_name("rg/client")
+        with self.assertRaisesRegex(ValueError, "must not end with a period"):
+            deployment_lib.validate_resource_group_name("rg-client.")
+
     def test_command_rendering_masks_secrets(self):
         rendered = deployment_lib.render_command(
             ["az", "rest", "--method", "PATCH", "--body", '{"password":"super-secret","name":"demo"}'],
@@ -205,6 +212,101 @@ class DeployClientEnvironmentTests(unittest.TestCase):
         )
         self.assertEqual(row["entra_client_secret"], "secret")
         self.assertEqual(row["postgres_location"], "eastus")
+
+    def test_default_state_captures_existing_resource_group_choice(self):
+        source = {
+            "app_version": "3.3.0",
+            "staging_version_source": ".github/workflows/deploy-staging.yml",
+            "git_branch": "main",
+            "git_commit_sha": "abcdef1234567890",
+            "image_tag": "abcdef123456",
+        }
+        state = deployment_lib.build_default_state(
+            "Acme District",
+            source,
+            "sub-123",
+            "eastus",
+            "sharedacr",
+            resource_group="rg.shared_(prod)",
+            resource_group_provisioning_mode="existing",
+        )
+        self.assertEqual(state["azure"]["resource_group"], "rg.shared_(prod)")
+        self.assertEqual(state["azure"]["resource_group_provisioning_mode"], "existing")
+        row = deployment_lib.csv_row_from_state(state)
+        self.assertEqual(row["resource_group"], "rg.shared_(prod)")
+        self.assertEqual(row["resource_group_provisioning_mode"], "existing")
+
+    def test_ensure_resource_group_creates_new_group_by_default(self):
+        source = {
+            "app_version": "3.3.0",
+            "staging_version_source": ".github/workflows/deploy-staging.yml",
+            "git_branch": "main",
+            "git_commit_sha": "abcdef1234567890",
+            "image_tag": "abcdef123456",
+        }
+        state = deployment_lib.build_default_state("Acme District", source, "sub-123", "eastus", "sharedacr")
+        io = MagicMock()
+
+        with patch.object(deploy_client_environment, "run_command") as run_command_mock:
+            deploy_client_environment.ensure_resource_group(state, dry_run=False, io=io)
+
+        command = run_command_mock.call_args.args[0]
+        self.assertEqual(command[:3], ["az", "group", "create"])
+        self.assertIn(state["azure"]["resource_group"], command)
+        self.assertIn("eastus", command)
+
+    def test_ensure_resource_group_validates_existing_group_without_creating(self):
+        source = {
+            "app_version": "3.3.0",
+            "staging_version_source": ".github/workflows/deploy-staging.yml",
+            "git_branch": "main",
+            "git_commit_sha": "abcdef1234567890",
+            "image_tag": "abcdef123456",
+        }
+        state = deployment_lib.build_default_state(
+            "Acme District",
+            source,
+            "sub-123",
+            "eastus",
+            "sharedacr",
+            resource_group="rg-existing",
+            resource_group_provisioning_mode="existing",
+        )
+        io = MagicMock()
+
+        with (
+            patch.object(deploy_client_environment, "run_and_capture_or_default", return_value="rg-existing") as capture_mock,
+            patch.object(deploy_client_environment, "run_command") as run_command_mock,
+        ):
+            deploy_client_environment.ensure_resource_group(state, dry_run=False, io=io)
+
+        command = capture_mock.call_args.args[0]
+        self.assertEqual(command[:3], ["az", "group", "show"])
+        self.assertIn("rg-existing", command)
+        run_command_mock.assert_not_called()
+
+    def test_ensure_resource_group_fails_when_existing_group_is_missing(self):
+        source = {
+            "app_version": "3.3.0",
+            "staging_version_source": ".github/workflows/deploy-staging.yml",
+            "git_branch": "main",
+            "git_commit_sha": "abcdef1234567890",
+            "image_tag": "abcdef123456",
+        }
+        state = deployment_lib.build_default_state(
+            "Acme District",
+            source,
+            "sub-123",
+            "eastus",
+            "sharedacr",
+            resource_group="rg-missing",
+            resource_group_provisioning_mode="existing",
+        )
+        io = MagicMock()
+
+        with patch.object(deploy_client_environment, "run_and_capture_or_default", return_value=""):
+            with self.assertRaisesRegex(deploy_client_environment.DeploymentError, "Resource group does not exist"):
+                deploy_client_environment.ensure_resource_group(state, dry_run=False, io=io)
 
     def test_external_acr_state_and_csv_row_capture_registry_credentials(self):
         source = {

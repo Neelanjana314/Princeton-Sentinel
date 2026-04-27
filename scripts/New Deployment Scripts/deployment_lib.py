@@ -54,6 +54,7 @@ MASTER_CSV_FIELDS = [
     "azure_subscription",
     "azure_location",
     "resource_group",
+    "resource_group_provisioning_mode",
     "containerapp_environment",
     "acr_access_mode",
     "acr_provisioning_mode",
@@ -209,6 +210,17 @@ def normalize_acr_name(value: str, *, max_length: int = 50) -> str:
     normalized = normalized[:max_length]
     if len(normalized) < 5:
         normalized = f"{normalized}{'0' * (5 - len(normalized))}"
+    return normalized
+
+
+def validate_resource_group_name(value: str) -> str:
+    normalized = validate_non_empty(value)
+    if len(normalized) > 90:
+        raise ValueError("resource group name must be 90 characters or fewer")
+    if normalized.endswith("."):
+        raise ValueError("resource group name must not end with a period")
+    if not re.fullmatch(r"[A-Za-z0-9_.()\-]+", normalized):
+        raise ValueError("resource group name contains unsupported characters")
     return normalized
 
 
@@ -434,6 +446,8 @@ def build_default_state(
     location: str,
     acr_name: str,
     *,
+    resource_group: str | None = None,
+    resource_group_provisioning_mode: str = "create",
     acr_access_mode: str = "managed-identity",
     acr_provisioning_mode: str = "existing",
     acr_sku: str = "",
@@ -446,6 +460,7 @@ def build_default_state(
     deployment_root = DEPLOYMENTS_ROOT / client_slug / deployment_id
     name_stem = normalize_resource_name(f"ps-{client_slug}", max_length=20)
     postgres_server = normalize_resource_name(f"pg-{client_slug}", max_length=30)
+    resolved_resource_group = validate_resource_group_name(resource_group or f"rg-{name_stem}")
     state = {
         "deployment_id": deployment_id,
         "client_name": client_name,
@@ -458,6 +473,7 @@ def build_default_state(
         "azure": {
             "subscription": subscription,
             "location": location,
+            "resource_group_provisioning_mode": resource_group_provisioning_mode,
             "acr_access_mode": acr_access_mode,
             "acr_provisioning_mode": acr_provisioning_mode,
             "acr_sku": acr_sku,
@@ -465,7 +481,7 @@ def build_default_state(
             "acr_login_server": acr_login_server,
             "acr_username": acr_username,
             "acr_password": acr_password,
-            "resource_group": f"rg-{name_stem}",
+            "resource_group": resolved_resource_group,
             "log_analytics_workspace": f"law-{name_stem}",
             "containerapp_environment": f"cae-{name_stem}",
             "app_insights_name": f"appi-{name_stem}",
@@ -583,6 +599,7 @@ def build_runtime_env_snapshot(state: dict[str, Any]) -> dict[str, str]:
         "GRAPH_PERMISSIONS_STALE_AFTER_HOURS": str(runtime.get("GRAPH_PERMISSIONS_STALE_AFTER_HOURS") or ""),
         "FLUSH_EVERY": str(runtime.get("FLUSH_EVERY") or ""),
         "AZ_RESOURCE_GROUP": str(azure.get("resource_group") or ""),
+        "AZ_RESOURCE_GROUP_PROVISIONING_MODE": str(azure.get("resource_group_provisioning_mode") or ""),
         "AZ_ACR_ACCESS_MODE": str(azure.get("acr_access_mode") or ""),
         "AZ_ACR_PROVISIONING_MODE": str(azure.get("acr_provisioning_mode") or ""),
         "AZ_ACR_NAME": str(azure.get("acr_name") or ""),
@@ -622,6 +639,7 @@ def build_summary_markdown(state: dict[str, Any]) -> str:
         f"- Subscription: `{sanitize_markdown(azure.get('subscription'))}`",
         f"- Location: `{sanitize_markdown(azure.get('location'))}`",
         f"- Resource group: `{sanitize_markdown(azure.get('resource_group'))}`",
+        f"- Resource group provisioning mode: `{sanitize_markdown(azure.get('resource_group_provisioning_mode'))}`",
         f"- Container Apps environment: `{sanitize_markdown(azure.get('containerapp_environment'))}`",
         f"- ACR access mode: `{sanitize_markdown(azure.get('acr_access_mode'))}`",
         f"- ACR provisioning mode: `{sanitize_markdown(azure.get('acr_provisioning_mode'))}`",
@@ -702,6 +720,7 @@ def csv_row_from_state(state: dict[str, Any]) -> dict[str, str]:
         "azure_subscription": str(azure.get("subscription") or ""),
         "azure_location": str(azure.get("location") or ""),
         "resource_group": str(azure.get("resource_group") or ""),
+        "resource_group_provisioning_mode": str(azure.get("resource_group_provisioning_mode") or ""),
         "containerapp_environment": str(azure.get("containerapp_environment") or ""),
         "acr_access_mode": str(azure.get("acr_access_mode") or ""),
         "acr_provisioning_mode": str(azure.get("acr_provisioning_mode") or ""),

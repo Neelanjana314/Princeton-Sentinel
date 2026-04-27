@@ -52,6 +52,9 @@ Prompts for:
 - client name
 - Azure subscription
 - Azure location
+- whether to deploy into an existing resource group
+- if existing: existing resource group name
+- if creating: new resource group name, defaulting to `rg-ps-<client-slug>`
 - whether to reuse an existing client-tenant ACR
 - if reusing: existing ACR name
 - if creating: new ACR name, with a Basic SKU created during provisioning
@@ -77,7 +80,7 @@ Prompts for:
 
 Creates or confirms:
 
-- resource group
+- resource group, or validates the existing resource group selected during init
 - Log Analytics workspace
 - Container Apps environment
 - Application Insights component
