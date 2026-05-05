@@ -203,6 +203,14 @@ function writeDelegatedTokenCache(
   result: PowerPlatformTokenResult,
   expiresAtMs?: number | null
 ) {
+  if (!result.accessToken) {
+    const cacheKey = buildDelegatedTokenCacheKey(session, scopes);
+    if (cacheKey) {
+      delegatedTokenCache.delete(cacheKey);
+    }
+    return;
+  }
+
   const cacheKey = buildDelegatedTokenCacheKey(session, scopes);
   if (!cacheKey) {
     return;
@@ -427,7 +435,7 @@ function readRoleCache(session: Session | any): RoleCheckResult | null {
 
 function writeRoleCache(session: Session | any, result: RoleCheckResult) {
   const cacheKey = buildRoleCacheKey(session);
-  if (result.error && result.error !== "graph_consent_required" && result.error !== "graph_token_unavailable") {
+  if (result.error) {
     roleCache.delete(cacheKey);
     return;
   }

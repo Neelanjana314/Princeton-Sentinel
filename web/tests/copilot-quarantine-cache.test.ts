@@ -125,6 +125,81 @@ test("role cache is invalidated when delegated auth state changes", async () => 
   }
 });
 
+test("consent-required role checks are retried after admin consent", async () => {
+  resetCopilotQuarantineCachesForTests();
+  resetDelegatedAuthStateForTests();
+
+  saveDelegatedAuthState({
+    oid: "oid-1",
+    upn: "admin@example.com",
+    refreshToken: "refresh-token",
+  });
+
+  const originalFetch = global.fetch;
+  let tokenRequests = 0;
+  let roleRequests = 0;
+
+  global.fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+
+    if (url.includes("/oauth2/v2.0/token")) {
+      tokenRequests += 1;
+      if (tokenRequests === 1) {
+        return new Response(
+          JSON.stringify({
+            error: "invalid_grant",
+            error_description: "AADSTS65001: consent_required",
+          }),
+          { status: 400, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      return new Response(
+        JSON.stringify({
+          access_token: buildJwt({
+            scp: "Directory.Read.All",
+            exp: Math.floor(Date.now() / 1000) + 3600,
+          }),
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    if (url.includes("graph.microsoft.com")) {
+      roleRequests += 1;
+      return new Response(
+        JSON.stringify({
+          value: [{ displayName: "Power Platform Administrator" }],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    throw new Error(`unexpected fetch url: ${url}`);
+  }) as typeof fetch;
+
+  try {
+    const session = { user: { oid: "oid-1", upn: "admin@example.com" } };
+
+    const first = await evaluateCopilotQuarantineRoles(session);
+    assert.equal(first.allowed, false);
+    assert.equal(first.error, "graph_consent_required");
+    assert.equal(tokenRequests, 1);
+    assert.equal(roleRequests, 0);
+
+    const second = await evaluateCopilotQuarantineRoles(session);
+    assert.equal(second.allowed, true);
+    assert.deepEqual(second.matchedRoles, ["Power Platform Administrator"]);
+    assert.equal(second.error, null);
+    assert.equal(tokenRequests, 2);
+    assert.equal(roleRequests, 1);
+  } finally {
+    global.fetch = originalFetch;
+    resetCopilotQuarantineCachesForTests();
+    resetDelegatedAuthStateForTests();
+  }
+});
+
 test("transient graph role check failures are not cached across retries", async () => {
   resetCopilotQuarantineCachesForTests();
   resetDelegatedAuthStateForTests();
