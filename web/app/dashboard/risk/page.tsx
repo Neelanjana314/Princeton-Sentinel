@@ -154,7 +154,7 @@ async function RiskPage({ searchParams }: { searchParams?: Promise<SearchParams>
   const clampedPage = Math.min(page, totalPages);
   const offset = (clampedPage - 1) * pageSize;
 
-  const [pageItems, topSitesRows, flagBreakdownRows, anonymousItems, orgItems] = await Promise.all([
+  const [pageItems, topSitesRows, flagBreakdownRows, anonymousFileCountRows, orgFileCountRows] = await Promise.all([
     query<any>(
       `
       ${flaggedBase}
@@ -210,48 +210,34 @@ async function RiskPage({ searchParams }: { searchParams?: Promise<SearchParams>
     query<any>(
       `
       SELECT
-        i.drive_id,
-        i.id,
-        i.name,
-        i.web_url,
-        i.normalized_path,
-        i.size,
-        i.modified_dt,
-        SUM(d.link_shares)::int AS link_shares,
-        'anonymous'::text AS link_scope
-      FROM mv_msgraph_item_link_daily d
-      JOIN msgraph_drive_items i ON i.drive_id = d.drive_id AND i.id = d.item_id
-      JOIN msgraph_drives dr ON dr.id = i.drive_id
-      WHERE d.link_scope = 'anonymous' AND i.deleted_at IS NULL AND dr.deleted_at IS NULL
-        AND LOWER(COALESCE(dr.web_url, '')) NOT LIKE '%cachelibrary%'
-        ${windowStart ? "AND d.day >= date_trunc('day', $1::timestamptz)" : ""}
-      GROUP BY i.drive_id, i.id, i.name, i.web_url, i.normalized_path, i.size, i.modified_dt
-      ORDER BY link_shares DESC NULLS LAST
-      LIMIT 25
+        COUNT(*)::int AS total
+      FROM (
+        SELECT i.drive_id, i.id
+        FROM mv_msgraph_item_link_daily d
+        JOIN msgraph_drive_items i ON i.drive_id = d.drive_id AND i.id = d.item_id
+        JOIN msgraph_drives dr ON dr.id = i.drive_id
+        WHERE d.link_scope = 'anonymous' AND i.deleted_at IS NULL AND dr.deleted_at IS NULL
+          AND LOWER(COALESCE(dr.web_url, '')) NOT LIKE '%cachelibrary%'
+          ${windowStart ? "AND d.day >= date_trunc('day', $1::timestamptz)" : ""}
+        GROUP BY i.drive_id, i.id
+      ) files
       `,
       windowStart ? [windowStart] : []
     ),
     query<any>(
       `
       SELECT
-        i.drive_id,
-        i.id,
-        i.name,
-        i.web_url,
-        i.normalized_path,
-        i.size,
-        i.modified_dt,
-        SUM(d.link_shares)::int AS link_shares,
-        'organization'::text AS link_scope
-      FROM mv_msgraph_item_link_daily d
-      JOIN msgraph_drive_items i ON i.drive_id = d.drive_id AND i.id = d.item_id
-      JOIN msgraph_drives dr ON dr.id = i.drive_id
-      WHERE d.link_scope = 'organization' AND i.deleted_at IS NULL AND dr.deleted_at IS NULL
-        AND LOWER(COALESCE(dr.web_url, '')) NOT LIKE '%cachelibrary%'
-        ${windowStart ? "AND d.day >= date_trunc('day', $1::timestamptz)" : ""}
-      GROUP BY i.drive_id, i.id, i.name, i.web_url, i.normalized_path, i.size, i.modified_dt
-      ORDER BY link_shares DESC NULLS LAST
-      LIMIT 25
+        COUNT(*)::int AS total
+      FROM (
+        SELECT i.drive_id, i.id
+        FROM mv_msgraph_item_link_daily d
+        JOIN msgraph_drive_items i ON i.drive_id = d.drive_id AND i.id = d.item_id
+        JOIN msgraph_drives dr ON dr.id = i.drive_id
+        WHERE d.link_scope = 'organization' AND i.deleted_at IS NULL AND dr.deleted_at IS NULL
+          AND LOWER(COALESCE(dr.web_url, '')) NOT LIKE '%cachelibrary%'
+          ${windowStart ? "AND d.day >= date_trunc('day', $1::timestamptz)" : ""}
+        GROUP BY i.drive_id, i.id
+      ) files
       `,
       windowStart ? [windowStart] : []
     ),
@@ -271,6 +257,8 @@ async function RiskPage({ searchParams }: { searchParams?: Promise<SearchParams>
     "Multiple signals": Number(flagRow.multiple_signals || 0),
   };
   const multiSignalSites = Number(flagRow.multiple_signals || 0);
+  const anonymousFileCount = Number(anonymousFileCountRows[0]?.total || 0);
+  const orgFileCount = Number(orgFileCountRows[0]?.total || 0);
 
   return (
     <main className="ps-page">
@@ -319,13 +307,13 @@ async function RiskPage({ searchParams }: { searchParams?: Promise<SearchParams>
         </Card>
         <Card className="text-center">
           <CardHeader>
-            <CardTitle className="text-3xl font-bold">{formatNumber(anonymousItems.length)}</CardTitle>
+            <CardTitle className="text-3xl font-bold">{formatNumber(anonymousFileCount)}</CardTitle>
             <CardDescription>Files w/ anonymous links</CardDescription>
           </CardHeader>
         </Card>
         <Card className="text-center">
           <CardHeader>
-            <CardTitle className="text-3xl font-bold">{formatNumber(orgItems.length)}</CardTitle>
+            <CardTitle className="text-3xl font-bold">{formatNumber(orgFileCount)}</CardTitle>
             <CardDescription>Files w/ org links</CardDescription>
           </CardHeader>
         </Card>
