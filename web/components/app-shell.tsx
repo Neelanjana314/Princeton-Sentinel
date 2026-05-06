@@ -225,14 +225,14 @@ function AppShellContent({
         {children}
       </main>
       <footer className="border-t bg-card/70">
-        <div className="mx-auto grid w-full max-w-7xl gap-3 px-4 py-4 text-xs text-muted-foreground sm:grid-cols-3 sm:items-center lg:px-6">
+        <div className="mx-auto grid w-full max-w-7xl items-start gap-3 px-4 py-4 text-xs text-muted-foreground sm:grid-cols-3 lg:px-6">
           <div className="flex flex-col gap-1">
             <p>Copyright 2026.</p>
             <p>All Rights Reserved.</p>
           </div>
           <p className="text-center">Princeton Sentinel powered by Princeton IT Services</p>
           <address className="flex flex-col gap-1 not-italic sm:items-end">
-            <span>Address 500 Alexander Park, #201, Princeton, NJ 08540</span>
+            <span>Address: 500 Alexander Park, #201, Princeton, NJ 08540</span>
             <a className="hover:text-foreground" href="mailto:support.sentinel@princetonits.com">
               Support Email: support.sentinel@princetonits.com
             </a>
