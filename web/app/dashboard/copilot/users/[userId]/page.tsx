@@ -45,14 +45,12 @@ async function CopilotUserPage({
 
   const [
     profileRows,
-    reportDetailRows,
     summaryRows,
     appRows,
     hourlyRows,
     appHourlyRows,
     conversationRows,
     contextRows,
-    periodRows,
     dataRefreshFinishedAt,
   ] = await Promise.all([
     query<any>(
@@ -80,15 +78,6 @@ async function CopilotUserPage({
       LIMIT 1
       `,
       [userId]
-    ),
-    query<any>(
-      `
-      SELECT report_refresh_date, report_period, enabled_for_copilot, active_in_period, last_activity_date
-      FROM m365_copilot_usage_user_detail
-      WHERE entra_user_id = $1 AND source_period = $2
-      LIMIT 1
-      `,
-      [userId, selectedPeriod]
     ),
     query<any>(
       `
@@ -161,29 +150,12 @@ async function CopilotUserPage({
       `,
       [userId, selectedPeriodDays]
     ),
-    query<any>(
-      `
-      SELECT source_period, report_refresh_date, enabled_for_copilot, active_in_period, last_activity_date
-      FROM m365_copilot_usage_user_detail
-      WHERE entra_user_id = $1
-      ORDER BY CASE source_period
-        WHEN 'D7' THEN 1
-        WHEN 'D30' THEN 2
-        WHEN 'D90' THEN 3
-        WHEN 'D180' THEN 4
-        WHEN 'ALL' THEN 5
-        ELSE 6
-      END
-      `,
-      [userId]
-    ),
     getLatestDataRefreshFinishedAt("copilot_usage_sync"),
   ]);
 
   const profile = profileRows[0];
   if (!profile) notFound();
 
-  const reportDetail = reportDetailRows[0] || {};
   const summary = summaryRows[0] || {};
   const promptCount = Number(summary.prompts || 0);
   const requests = Number(summary.requests || 0);
@@ -292,33 +264,8 @@ async function CopilotUserPage({
         />
       </MetricGrid>
 
-      <div className="grid gap-3 lg:grid-cols-3">
+      <div className="grid gap-3">
         <Card>
-          <CardHeader>
-            <CardTitle>Report status</CardTitle>
-            <CardDescription>{currentRange.label} Graph report row for this user</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <SimpleTable
-              rows={[reportDetail]}
-              emptyLabel="No report detail row for this user and period."
-              columns={[
-                ["Enabled", (row) => formatBoolean(row.enabled_for_copilot)],
-                ["Active", (row) => formatBoolean(row.active_in_period)],
-                [
-                  "Last activity",
-                  (row) => (row.last_activity_date ? <LocalDateTime value={String(row.last_activity_date)} dateOnly /> : "--"),
-                ],
-                [
-                  "Refresh",
-                  (row) => (row.report_refresh_date ? <LocalDateTime value={String(row.report_refresh_date)} dateOnly /> : "--"),
-                ],
-              ]}
-            />
-          </CardContent>
-        </Card>
-
-        <Card className="lg:col-span-2">
           <CardHeader>
             <CardTitle>Application ratio</CardTitle>
             <CardDescription>{currentRange.label} user prompts by source app</CardDescription>
@@ -394,34 +341,8 @@ async function CopilotUserPage({
           </CardContent>
         </Card>
       </div>
-
-      <Card className="mt-3">
-        <CardHeader>
-          <CardTitle>Report periods</CardTitle>
-          <CardDescription>Microsoft 365 Copilot report detail snapshots for this user</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <SimpleTable
-            rows={periodRows}
-            emptyLabel="No report period rows for this user."
-            columns={[
-              ["Period", (row) => PERIODS.find((period) => period.value === row.source_period)?.label || row.source_period],
-              ["Enabled", (row) => formatBoolean(row.enabled_for_copilot)],
-              ["Active", (row) => formatBoolean(row.active_in_period)],
-              ["Last activity", (row) => (row.last_activity_date ? <LocalDateTime value={String(row.last_activity_date)} dateOnly /> : "--")],
-              ["Refresh", (row) => (row.report_refresh_date ? <LocalDateTime value={String(row.report_refresh_date)} dateOnly /> : "--")],
-            ]}
-          />
-        </CardContent>
-      </Card>
     </main>
   );
-}
-
-function formatBoolean(value: unknown) {
-  if (value === true) return "Yes";
-  if (value === false) return "No";
-  return "--";
 }
 
 function EmptyState({ label }: { label: string }) {
