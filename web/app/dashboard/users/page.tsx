@@ -248,7 +248,7 @@ async function UsersPage({ searchParams }: { searchParams?: Promise<SearchParams
       <PageHeader
         title="Users"
         subtitle={`${statusSubtitle} Activity charts use the ${windowDays == null ? "all-time" : `${windowDays}d`} window.`}
-        actions={<DataRefreshTimestamp sourceLabel="Graph sync" finishedAt={dataRefreshFinishedAt} />}
+        actions={<DataRefreshTimestamp sourceLabel="Tenant data sync" finishedAt={dataRefreshFinishedAt} />}
       />
       <form action="/dashboard/users" method="get">
         <FilterBar>

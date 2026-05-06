@@ -122,7 +122,7 @@ async function SitesPage({ searchParams }: { searchParams?: Promise<SearchParams
       <PageHeader
         title="SharePoint Sites"
         subtitle="Inventory for the same SharePoint site population shown on the dashboard overview."
-        actions={<DataRefreshTimestamp sourceLabel="Graph sync" finishedAt={dataRefreshFinishedAt} />}
+        actions={<DataRefreshTimestamp sourceLabel="Tenant data sync" finishedAt={dataRefreshFinishedAt} />}
       />
 
       <form action="/dashboard/sites" method="get">

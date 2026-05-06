@@ -187,7 +187,7 @@ async function ActivityPage({ searchParams }: { searchParams?: Promise<SearchPar
       <PageHeader
         title="Activity"
         subtitle={`Based on item timestamps and cached link-permission sync observations. Window: ${windowDays ?? "all"}d.`}
-        actions={<DataRefreshTimestamp sourceLabel="Graph sync" finishedAt={dataRefreshFinishedAt} />}
+        actions={<DataRefreshTimestamp sourceLabel="Tenant data sync" finishedAt={dataRefreshFinishedAt} />}
       />
 
       <form action="/dashboard/activity" method="get">

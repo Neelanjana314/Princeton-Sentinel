@@ -145,7 +145,7 @@ async function SharingLinksPage({ searchParams }: { searchParams?: Promise<Searc
           <p className="mt-2 text-xs uppercase tracking-[0.3em] text-muted-foreground">Cached (DB)</p>
         </div>
         <div className="flex flex-wrap items-center justify-end gap-3 text-sm">
-          <DataRefreshTimestamp sourceLabel="Graph sync" finishedAt={dataRefreshFinishedAt} />
+          <DataRefreshTimestamp sourceLabel="Tenant data sync" finishedAt={dataRefreshFinishedAt} />
           <Link className="text-muted-foreground hover:underline" href={backHref}>
             {backLabel}
           </Link>

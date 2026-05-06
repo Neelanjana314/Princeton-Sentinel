@@ -108,7 +108,7 @@ async function GroupsPage({ searchParams }: { searchParams?: Promise<SearchParam
       <PageHeader
         title="Groups"
         subtitle="Microsoft 365 groups and membership counts from the ingest."
-        actions={<DataRefreshTimestamp sourceLabel="Graph sync" finishedAt={dataRefreshFinishedAt} />}
+        actions={<DataRefreshTimestamp sourceLabel="Tenant data sync" finishedAt={dataRefreshFinishedAt} />}
       />
 
       <form action="/dashboard/groups" method="get">

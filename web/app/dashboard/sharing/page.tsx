@@ -191,7 +191,7 @@ async function SharingPage({ searchParams }: { searchParams?: Promise<SearchPara
       <PageHeader
         title="Sharing"
         subtitle="Sharing links and external access signals."
-        actions={<DataRefreshTimestamp sourceLabel="Graph sync" finishedAt={dataRefreshFinishedAt} />}
+        actions={<DataRefreshTimestamp sourceLabel="Tenant data sync" finishedAt={dataRefreshFinishedAt} />}
       />
       <form action="/dashboard/sharing" method="get">
         <FilterBar>

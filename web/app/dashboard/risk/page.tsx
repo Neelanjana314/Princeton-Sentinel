@@ -271,7 +271,7 @@ async function RiskPage({ searchParams }: { searchParams?: Promise<SearchParams>
       <PageHeader
         title="Risk"
         subtitle={`Site-level risk signals with file-level exposure detail. File window: ${windowDays ?? "all"}d.`}
-        actions={<DataRefreshTimestamp sourceLabel="Graph sync" finishedAt={dataRefreshFinishedAt} />}
+        actions={<DataRefreshTimestamp sourceLabel="Tenant data sync" finishedAt={dataRefreshFinishedAt} />}
       />
       <form action="/dashboard/risk" method="get">
         <FilterBar>

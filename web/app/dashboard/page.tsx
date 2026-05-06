@@ -170,9 +170,9 @@ async function DashboardPage() {
   return (
     <main className="ps-page">
       <PageHeader
-        title="Dashboard"
+        title="Overview"
         subtitle="High-level posture signals from directory, storage, and sharing metadata."
-        actions={<DataRefreshTimestamp sourceLabel="Graph sync" finishedAt={dataRefreshFinishedAt} />}
+        actions={<DataRefreshTimestamp sourceLabel="Tenant data sync" finishedAt={dataRefreshFinishedAt} />}
       />
 
       <DashboardOverviewMetrics totals={chartTotals} />
