@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { requireUser } from "@/app/lib/auth";
 import { query } from "@/app/lib/db";
@@ -11,6 +12,7 @@ import { getParam, getWindowDays, SearchParams } from "@/app/lib/params";
 import { getInternalDomainPatterns } from "@/app/lib/internalDomains";
 
 import { HistoryBackButton } from "@/components/history-back-button";
+import { ResetFiltersButton } from "@/components/filter-bar";
 import { SiteActivityTrendTable, SiteTopUsersTable } from "./site-detail-tables";
 import { SiteAvailabilityNotice } from "./site-availability-notice";
 
@@ -275,9 +277,10 @@ async function DriveDetailPage({
               <option value="90">90d</option>
               <option value="365">365d</option>
             </select>
-            <button className="text-muted-foreground hover:underline" type="submit">
+            <Button type="submit" variant="outline" size="sm">
               Apply
-            </button>
+            </Button>
+            <ResetFiltersButton href={`/sites/${encodeURIComponent(driveId)}`} size="sm" className="self-auto" />
           </form>
         </div>
       </div>

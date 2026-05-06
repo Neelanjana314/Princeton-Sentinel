@@ -6,6 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Pagination } from "@/components/pagination";
+import { ResetFiltersButton } from "@/components/filter-bar";
 import { requireUser } from "@/app/lib/auth";
 import { query } from "@/app/lib/db";
 import { formatIsoDateTime, safeDecode } from "@/app/lib/format";
@@ -194,6 +195,7 @@ async function UserDetailPage({
               <Button type="submit" variant="outline" size="sm">
                 Apply
               </Button>
+              <ResetFiltersButton href={`/dashboard/users/${encodeURIComponent(userId)}`} size="sm" className="self-auto" />
             </form>
           </>
         }

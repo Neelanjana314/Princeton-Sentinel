@@ -12,9 +12,10 @@ import { buildSitePrincipalCountsCte } from "@/app/lib/site-principal-counts";
 import { SharingSummaryBarChartClient, SharingSummaryPieChartClient } from "@/components/sharing-summary-graphs-client";
 import { SharingLinkBreakdownTable, SharingSitesTable } from "./sharing-tables";
 import PageHeader from "@/components/page-header";
-import FilterBar, { AppliedFilterTags, FilterField, formatSearchFilterValue } from "@/components/filter-bar";
+import FilterBar, { AppliedFilterTags, FilterField, ResetFiltersButton, formatSearchFilterValue } from "@/components/filter-bar";
 import MetricGrid from "@/components/metric-grid";
 import { MetricCard } from "@/components/metric-card";
+import DataRefreshTimestamp, { getLatestDataRefreshFinishedAt } from "@/components/data-refresh-timestamp";
 
 function buildSearchFilter(search: string | null) {
   if (!search) return { clause: "", params: [] as any[] };
@@ -111,7 +112,7 @@ async function SharingPage({ searchParams }: { searchParams?: Promise<SearchPara
       ${clause}
     )
   `;
-  const [breakdownRows, breakdownChartRows, totalLinksRows, lbCountRows, topSites, countRows, rawSiteRows] = await Promise.all([
+  const [breakdownRows, breakdownChartRows, totalLinksRows, lbCountRows, topSites, countRows, rawSiteRows, dataRefreshFinishedAt] = await Promise.all([
     query<any>(
       `
       SELECT link_scope, link_type, count
@@ -166,6 +167,7 @@ async function SharingPage({ searchParams }: { searchParams?: Promise<SearchPara
       `,
       [...params, internalDomainPatterns, pageSize, offset]
     ),
+    getLatestDataRefreshFinishedAt("graph_ingest"),
   ]);
 
   const totalLinks = totalLinksRows[0]?.total_links || 0;
@@ -186,7 +188,11 @@ async function SharingPage({ searchParams }: { searchParams?: Promise<SearchPara
 
   return (
     <main className="ps-page">
-      <PageHeader title="Sharing" subtitle="Sharing links and external access signals." />
+      <PageHeader
+        title="Sharing"
+        subtitle="Sharing links and external access signals."
+        actions={<DataRefreshTimestamp sourceLabel="Graph sync" finishedAt={dataRefreshFinishedAt} />}
+      />
       <form action="/dashboard/sharing" method="get">
         <FilterBar>
           <FilterField label="Search">
@@ -205,6 +211,7 @@ async function SharingPage({ searchParams }: { searchParams?: Promise<SearchPara
           <Button type="submit" variant="outline" className="self-end">
             Apply
           </Button>
+          <ResetFiltersButton href="/dashboard/sharing" />
           <AppliedFilterTags
             tags={[
               { label: "Search", value: formatSearchFilterValue(search) },

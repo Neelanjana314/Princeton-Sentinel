@@ -12,7 +12,8 @@ import { buildSitePrincipalCountsCte } from "@/app/lib/site-principal-counts";
 import { RiskTable } from "./risk-table";
 import { RiskSummaryBarChartClient, RiskSummaryPieChartClient } from "@/components/risk-summary-graphs-client";
 import PageHeader from "@/components/page-header";
-import FilterBar, { AppliedFilterTags, FilterField, formatSearchFilterValue } from "@/components/filter-bar";
+import FilterBar, { AppliedFilterTags, FilterField, ResetFiltersButton, formatSearchFilterValue } from "@/components/filter-bar";
+import DataRefreshTimestamp, { getLatestDataRefreshFinishedAt } from "@/components/data-refresh-timestamp";
 
 function buildSearchFilter(search: string | null) {
   if (!search) return { clause: "", params: [] as any[] };
@@ -158,7 +159,7 @@ async function RiskPage({ searchParams }: { searchParams?: Promise<SearchParams>
   const clampedPage = Math.min(page, totalPages);
   const offset = (clampedPage - 1) * pageSize;
 
-  const [pageItems, topSitesRows, flagBreakdownRows, anonymousFileCountRows, orgFileCountRows] = await Promise.all([
+  const [pageItems, topSitesRows, flagBreakdownRows, anonymousFileCountRows, orgFileCountRows, dataRefreshFinishedAt] = await Promise.all([
     query<any>(
       `
       ${flaggedBase}
@@ -245,6 +246,7 @@ async function RiskPage({ searchParams }: { searchParams?: Promise<SearchParams>
       `,
       windowStart ? [windowStart] : []
     ),
+    getLatestDataRefreshFinishedAt("graph_ingest"),
   ]);
 
   const topSites = topSitesRows.map((s: any) => ({
@@ -269,6 +271,7 @@ async function RiskPage({ searchParams }: { searchParams?: Promise<SearchParams>
       <PageHeader
         title="Risk"
         subtitle={`Site-level risk signals with file-level exposure detail. File window: ${windowDays ?? "all"}d.`}
+        actions={<DataRefreshTimestamp sourceLabel="Graph sync" finishedAt={dataRefreshFinishedAt} />}
       />
       <form action="/dashboard/risk" method="get">
         <FilterBar>
@@ -305,6 +308,7 @@ async function RiskPage({ searchParams }: { searchParams?: Promise<SearchParams>
           <Button type="submit" variant="outline" className="self-end">
             Apply
           </Button>
+          <ResetFiltersButton href="/dashboard/risk" />
           <AppliedFilterTags
             tags={[
               { label: "Search", value: formatSearchFilterValue(search) },

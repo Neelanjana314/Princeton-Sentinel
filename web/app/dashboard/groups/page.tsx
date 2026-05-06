@@ -10,9 +10,10 @@ import { getPagination, getParam, getSortDirection, SearchParams } from "@/app/l
 import { GroupsTable } from "./groups-table";
 import { GroupsSummaryBarChartClient, GroupsSummaryPieChartClient } from "@/components/groups-summary-graphs-wrapper";
 import PageHeader from "@/components/page-header";
-import FilterBar, { AppliedFilterTags, FilterField, formatSearchFilterValue } from "@/components/filter-bar";
+import FilterBar, { AppliedFilterTags, FilterField, ResetFiltersButton, formatSearchFilterValue } from "@/components/filter-bar";
 import MetricGrid from "@/components/metric-grid";
 import { MetricCard } from "@/components/metric-card";
+import DataRefreshTimestamp, { getLatestDataRefreshFinishedAt } from "@/components/data-refresh-timestamp";
 
 function buildSearchFilter(search: string | null) {
   if (!search) return { clause: "", params: [] as any[] };
@@ -46,7 +47,7 @@ async function GroupsPage({ searchParams }: { searchParams?: Promise<SearchParam
   const whereClause = clause || "WHERE g.deleted_at IS NULL";
   const graphWhereClause = "WHERE g.deleted_at IS NULL";
 
-  const [rows, countRows, topGroupRows, visibilityBreakdown] = await Promise.all([
+  const [rows, countRows, topGroupRows, visibilityBreakdown, dataRefreshFinishedAt] = await Promise.all([
     query<any>(
       `
       SELECT
@@ -92,6 +93,7 @@ async function GroupsPage({ searchParams }: { searchParams?: Promise<SearchParam
       `,
       []
     ),
+    getLatestDataRefreshFinishedAt("graph_ingest"),
   ]);
   const total = countRows[0]?.total || 0;
 
@@ -103,7 +105,11 @@ async function GroupsPage({ searchParams }: { searchParams?: Promise<SearchParam
 
   return (
     <main className="ps-page">
-      <PageHeader title="Groups" subtitle="Microsoft 365 groups and membership counts from the ingest." />
+      <PageHeader
+        title="Groups"
+        subtitle="Microsoft 365 groups and membership counts from the ingest."
+        actions={<DataRefreshTimestamp sourceLabel="Graph sync" finishedAt={dataRefreshFinishedAt} />}
+      />
 
       <form action="/dashboard/groups" method="get">
         <FilterBar>
@@ -123,6 +129,7 @@ async function GroupsPage({ searchParams }: { searchParams?: Promise<SearchParam
           <Button type="submit" variant="outline" className="self-end">
             Apply
           </Button>
+          <ResetFiltersButton href="/dashboard/groups" />
           <AppliedFilterTags
             tags={[
               { label: "Search", value: formatSearchFilterValue(search) },

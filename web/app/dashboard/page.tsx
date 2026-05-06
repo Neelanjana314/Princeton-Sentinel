@@ -10,6 +10,7 @@ import PageHeader from "@/components/page-header";
 import { InfoTooltip } from "@/components/info-tooltip";
 import { cn } from "@/lib/utils";
 import { DashboardOverviewMetrics } from "@/components/dashboard-overview-metrics";
+import DataRefreshTimestamp, { getLatestDataRefreshFinishedAt } from "@/components/data-refresh-timestamp";
 
 export const dynamic = "force-dynamic";
 
@@ -70,7 +71,7 @@ function driveTypeHref(driveType: string | null | undefined) {
 async function DashboardPage() {
   await requireUser();
 
-  const [inventoryRows, activitySiteCountRows, linkBreakdownRows, driveTotalsRows, driveTypeRows, topStorageRows] = await Promise.all([
+  const [inventoryRows, activitySiteCountRows, linkBreakdownRows, driveTotalsRows, driveTypeRows, topStorageRows, dataRefreshFinishedAt] = await Promise.all([
     query<any>("SELECT * FROM mv_msgraph_inventory_summary LIMIT 1"),
     query<any>("SELECT COUNT(*)::int AS total FROM mv_msgraph_routable_site_drives"),
     query<any>("SELECT link_scope, link_type, count FROM mv_msgraph_link_breakdown"),
@@ -116,6 +117,7 @@ async function DashboardPage() {
       LIMIT 10
       `
     ),
+    getLatestDataRefreshFinishedAt("graph_ingest"),
   ]);
 
   const inventory = inventoryRows[0] || {};
@@ -170,6 +172,7 @@ async function DashboardPage() {
       <PageHeader
         title="Dashboard"
         subtitle="High-level posture signals from directory, storage, and sharing metadata."
+        actions={<DataRefreshTimestamp sourceLabel="Graph sync" finishedAt={dataRefreshFinishedAt} />}
       />
 
       <DashboardOverviewMetrics totals={chartTotals} />

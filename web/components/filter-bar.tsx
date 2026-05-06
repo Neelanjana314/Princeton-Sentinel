@@ -1,5 +1,6 @@
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 
 type AppliedFilterTag = {
   label: string;
@@ -30,6 +31,14 @@ export function FilterField({
 export function formatSearchFilterValue(value: string | null | undefined) {
   const trimmed = value?.trim();
   return trimmed ? trimmed : "All";
+}
+
+export function ResetFiltersButton({ href, className, size = "default" }: { href: string; className?: string; size?: "default" | "sm" | "lg" }) {
+  return (
+    <Button asChild variant="outline" size={size} className={cn("self-end", className)}>
+      <a href={href}>Reset</a>
+    </Button>
+  );
 }
 
 export function AppliedFilterTags({ tags, className }: { tags: AppliedFilterTag[]; className?: string }) {

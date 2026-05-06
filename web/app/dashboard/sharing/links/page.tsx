@@ -9,6 +9,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Pagination } from "@/components/pagination";
+import { ResetFiltersButton } from "@/components/filter-bar";
+import DataRefreshTimestamp, { getLatestDataRefreshFinishedAt } from "@/components/data-refresh-timestamp";
 
 import { SharingLinkItemsTable } from "./link-items-table";
 
@@ -36,6 +38,9 @@ async function SharingLinksPage({ searchParams }: { searchParams?: Promise<Searc
   const type = parseNullable(typeRaw);
   const search = getParam(resolvedSearchParams, "q") || "";
   const { page, pageSize } = getPagination(resolvedSearchParams, { page: 1, pageSize: 50 });
+  const resetParams = new URLSearchParams({ scope: scopeRaw, type: typeRaw });
+  if (driveId) resetParams.set("driveId", driveId);
+  const resetHref = `/dashboard/sharing/links?${resetParams.toString()}`;
 
   const params: any[] = [];
   let idx = 1;
@@ -79,35 +84,38 @@ async function SharingLinksPage({ searchParams }: { searchParams?: Promise<Searc
   const limitParam = `$${params.length + 1}`;
   const offsetParam = `$${params.length + 2}`;
 
-  const rows = await query<any>(
-    `
-    SELECT
-      i.drive_id,
-      i.id,
-      i.name,
-      i.web_url,
-      i.normalized_path,
-      i.path,
-      i.is_folder,
-      i.size,
-      MAX(i.modified_dt) AS last_modified_dt,
-      COUNT(p.permission_id)::int AS matching_permissions
-    FROM msgraph_drive_item_permissions p
-    JOIN msgraph_drive_items i ON i.drive_id = p.drive_id AND i.id = p.item_id
-    JOIN msgraph_drives d ON d.id = i.drive_id
-    WHERE p.deleted_at IS NULL AND i.deleted_at IS NULL
-      AND d.deleted_at IS NULL
-      AND LOWER(COALESCE(d.web_url, '')) NOT LIKE '%cachelibrary%'
-      ${driveFilter}
-      AND ${scopeFilter}
-      AND ${typeFilter}
-      ${searchClause}
-    GROUP BY i.drive_id, i.id, i.name, i.web_url, i.normalized_path, i.path, i.is_folder, i.size
-    ORDER BY matching_permissions DESC NULLS LAST
-    LIMIT ${limitParam} OFFSET ${offsetParam}
-    `,
-    listParams
-  );
+  const [rows, dataRefreshFinishedAt] = await Promise.all([
+    query<any>(
+      `
+      SELECT
+        i.drive_id,
+        i.id,
+        i.name,
+        i.web_url,
+        i.normalized_path,
+        i.path,
+        i.is_folder,
+        i.size,
+        MAX(i.modified_dt) AS last_modified_dt,
+        COUNT(p.permission_id)::int AS matching_permissions
+      FROM msgraph_drive_item_permissions p
+      JOIN msgraph_drive_items i ON i.drive_id = p.drive_id AND i.id = p.item_id
+      JOIN msgraph_drives d ON d.id = i.drive_id
+      WHERE p.deleted_at IS NULL AND i.deleted_at IS NULL
+        AND d.deleted_at IS NULL
+        AND LOWER(COALESCE(d.web_url, '')) NOT LIKE '%cachelibrary%'
+        ${driveFilter}
+        AND ${scopeFilter}
+        AND ${typeFilter}
+        ${searchClause}
+      GROUP BY i.drive_id, i.id, i.name, i.web_url, i.normalized_path, i.path, i.is_folder, i.size
+      ORDER BY matching_permissions DESC NULLS LAST
+      LIMIT ${limitParam} OFFSET ${offsetParam}
+      `,
+      listParams
+    ),
+    getLatestDataRefreshFinishedAt("graph_ingest"),
+  ]);
 
   const items = rows.map((row: any) => ({
     itemId: `${row.drive_id}::${row.id}`,
@@ -136,7 +144,8 @@ async function SharingLinksPage({ searchParams }: { searchParams?: Promise<Searc
           </p>
           <p className="mt-2 text-xs uppercase tracking-[0.3em] text-muted-foreground">Cached (DB)</p>
         </div>
-        <div className="flex items-center gap-3 text-sm">
+        <div className="flex flex-wrap items-center justify-end gap-3 text-sm">
+          <DataRefreshTimestamp sourceLabel="Graph sync" finishedAt={dataRefreshFinishedAt} />
           <Link className="text-muted-foreground hover:underline" href={backHref}>
             {backLabel}
           </Link>
@@ -173,6 +182,7 @@ async function SharingLinksPage({ searchParams }: { searchParams?: Promise<Searc
             <Button type="submit" variant="outline">
               Apply
             </Button>
+            <ResetFiltersButton href={resetHref} />
           </form>
           <SharingLinkItemsTable items={items} />
         </CardContent>

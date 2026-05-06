@@ -18,12 +18,13 @@ import AgentAccessControl from "@/components/agent-access-control";
 import { getParam, type SearchParams } from "@/app/lib/params";
 import { Button } from "@/components/ui/button";
 import PageHeader from "@/components/page-header";
-import FilterBar, { AppliedFilterTags, FilterField } from "@/components/filter-bar";
+import FilterBar, { AppliedFilterTags, FilterField, ResetFiltersButton } from "@/components/filter-bar";
 import MetricGrid from "@/components/metric-grid";
 import { MetricCard } from "@/components/metric-card";
 import { UniqueUsersCard, TotalConversationsCard, EscalatedOutcomeCard } from "@/components/unique-users-card";
 import { InfoTooltip } from "@/components/info-tooltip";
 import { ErrorDetailsTable } from "./error-details-table";
+import DataRefreshTimestamp, { getLatestDataRefreshFinishedAt } from "@/components/data-refresh-timestamp";
 
 export const dynamic = "force-dynamic";
 
@@ -124,7 +125,7 @@ async function AgentsPage({ searchParams }: { searchParams?: Promise<SearchParam
     ? errorWhere + ` AND session_id IN (SELECT session_id FROM copilot_sessions WHERE is_test = false AND deleted_at IS NULL)`
     : errorWhere;
 
-  const [summaryRows, uniqueUserCountRows, uniqueUserIdRows, errorCount, avgDurationRows, topicRows, toolRows, newVsReturnRows, responseTimeRows, singleVsMultiRows, errorsPerAgentRows, errorDetailRows, convsPerAgentRows, latestSessionRows, escalatedRows] = await Promise.all([
+  const [summaryRows, uniqueUserCountRows, uniqueUserIdRows, errorCount, avgDurationRows, topicRows, toolRows, newVsReturnRows, responseTimeRows, singleVsMultiRows, errorsPerAgentRows, errorDetailRows, convsPerAgentRows, latestSessionRows, escalatedRows, dataRefreshFinishedAt] = await Promise.all([
     query<any>(
       `SELECT
          date_trunc('day', started_at)::date AS day,
@@ -321,6 +322,7 @@ async function AgentsPage({ searchParams }: { searchParams?: Promise<SearchParam
        LIMIT 50`,
       sessionParams
     ),
+    getLatestDataRefreshFinishedAt("copilot_telemetry"),
   ]);
 
   // ── Aggregate metrics ──
@@ -477,6 +479,7 @@ async function AgentsPage({ searchParams }: { searchParams?: Promise<SearchParam
       <PageHeader
         title="Custom Agents Telemetry and Controls"
         subtitle={`Agent telemetry via Application Insights. Window: ${currentRange.label}.`}
+        actions={<DataRefreshTimestamp sourceLabel="Copilot telemetry sync" finishedAt={dataRefreshFinishedAt} />}
       />
 
       {/* ── Filters ── */}
@@ -534,6 +537,7 @@ async function AgentsPage({ searchParams }: { searchParams?: Promise<SearchParam
           <Button type="submit" variant="outline" className="self-end">
             Apply
           </Button>
+          <ResetFiltersButton href="/dashboard/agents" />
           <AppliedFilterTags
             tags={[
               { label: "Time range", value: currentRange.label },

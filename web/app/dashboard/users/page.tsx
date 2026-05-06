@@ -11,9 +11,10 @@ import { UsersTable } from "./users-table";
 import { buildHref } from "@/lib/pagination";
 import { UsersSummaryBarChartClient } from "@/components/users-summary-graphs-wrapper";
 import PageHeader from "@/components/page-header";
-import FilterBar, { AppliedFilterTags, FilterField, formatSearchFilterValue } from "@/components/filter-bar";
+import FilterBar, { AppliedFilterTags, FilterField, ResetFiltersButton, formatSearchFilterValue } from "@/components/filter-bar";
 import MetricGrid from "@/components/metric-grid";
 import { MetricCard } from "@/components/metric-card";
+import DataRefreshTimestamp, { getLatestDataRefreshFinishedAt } from "@/components/data-refresh-timestamp";
 import {
   buildUserStatusPredicate,
   getUserStatusLabel,
@@ -153,7 +154,7 @@ async function UsersPage({ searchParams }: { searchParams?: Promise<SearchParams
     )
   `;
 
-  const [rows, totalRows, summaryRows, topByModifiedRows, topBySitesRows] = await Promise.all([
+  const [rows, totalRows, summaryRows, topByModifiedRows, topBySitesRows, dataRefreshFinishedAt] = await Promise.all([
     query<any>(
       `
       ${usersDirectoryCte}
@@ -204,6 +205,7 @@ async function UsersPage({ searchParams }: { searchParams?: Promise<SearchParams
       `,
       graphActivityParams
     ),
+    getLatestDataRefreshFinishedAt("graph_ingest"),
   ]);
 
   const total = totalRows[0]?.total || 0;
@@ -246,6 +248,7 @@ async function UsersPage({ searchParams }: { searchParams?: Promise<SearchParams
       <PageHeader
         title="Users"
         subtitle={`${statusSubtitle} Activity charts use the ${windowDays == null ? "all-time" : `${windowDays}d`} window.`}
+        actions={<DataRefreshTimestamp sourceLabel="Graph sync" finishedAt={dataRefreshFinishedAt} />}
       />
       <form action="/dashboard/users" method="get">
         <FilterBar>
@@ -289,6 +292,7 @@ async function UsersPage({ searchParams }: { searchParams?: Promise<SearchParams
           <Button type="submit" variant="outline" className="self-end">
             Apply
           </Button>
+          <ResetFiltersButton href="/dashboard/users" />
           <AppliedFilterTags
             tags={[
               { label: "Search", value: formatSearchFilterValue(search) },

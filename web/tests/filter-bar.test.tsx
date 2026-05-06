@@ -23,6 +23,7 @@ if (!testGlobals.__psTmpAliasRegistered) {
 
 const {
   AppliedFilterTags,
+  ResetFiltersButton,
   formatSearchFilterValue,
 } = require("../components/filter-bar") as typeof import("../components/filter-bar");
 
@@ -57,4 +58,11 @@ test("applied filter tags expose accessible label text", () => {
   assert.match(markup, /aria-label="Applied filters"/);
   assert.match(markup, /aria-label="Search: All"/);
   assert.match(markup, /Search: All/);
+});
+
+test("reset filters button links to the default dashboard route", () => {
+  const markup = renderToStaticMarkup(React.createElement(ResetFiltersButton, { href: "/dashboard/activity" }));
+
+  assert.match(markup, /href="\/dashboard\/activity"/);
+  assert.match(markup, />Reset<\/a>/);
 });

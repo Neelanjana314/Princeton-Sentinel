@@ -87,6 +87,7 @@ test("activity page renders applied filter tags for site type, window, and page 
   assert.match(markup, /Site type: Personal/);
   assert.match(markup, /Activity window: 30d/);
   assert.match(markup, /Page size: 50/);
+  assert.match(markup, /href="\/dashboard\/activity"[^>]*>Reset/);
 });
 
 test("users page renders applied filter tags for status, activity window, and search", async () => {
@@ -98,6 +99,7 @@ test("users page renders applied filter tags for status, activity window, and se
   assert.match(markup, /Search: alice/);
   assert.match(markup, /User status: Inactive/);
   assert.match(markup, /Activity window: 7d/);
+  assert.match(markup, /href="\/dashboard\/users"[^>]*>Reset/);
 });
 
 test("agents page renders applied filter tags for range, agent, channel, and test data", async () => {
@@ -110,6 +112,7 @@ test("agents page renders applied filter tags for range, agent, channel, and tes
   assert.match(markup, /Agent: All Agents/);
   assert.match(markup, /Channel: All Channels/);
   assert.match(markup, /Test data: Production Only/);
+  assert.match(markup, /href="\/dashboard\/agents"[^>]*>Reset/);
 });
 
 test("copilot page renders the shared applied filter tag treatment", async () => {
@@ -120,4 +123,5 @@ test("copilot page renders the shared applied filter tag treatment", async () =>
 
   assert.match(markup, /Report period/);
   assert.match(markup, /Report period: 90 days/);
+  assert.match(markup, /href="\/dashboard\/copilot"[^>]*>Reset/);
 });

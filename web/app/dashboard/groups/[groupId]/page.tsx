@@ -6,6 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Pagination } from "@/components/pagination";
+import { ResetFiltersButton } from "@/components/filter-bar";
 import { requireUser } from "@/app/lib/auth";
 import { query } from "@/app/lib/db";
 import { safeDecode } from "@/app/lib/format";
@@ -188,6 +189,7 @@ async function GroupDetailPage({
             <Button type="submit" variant="outline">
               Apply
             </Button>
+            <ResetFiltersButton href={`/dashboard/groups/${encodeURIComponent(groupId)}`} />
           </form>
           <GroupMembersTable
             items={memberRows.map((row: any) => ({

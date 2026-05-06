@@ -10,9 +10,10 @@ import { getPagination, getParam, getSortDirection, getWindowDays, SearchParams 
 import { ActivityTable } from "./activity-table";
 import ActivitySummaryGraphsWrapper from "@/components/activity-summary-graphs-wrapper";
 import PageHeader from "@/components/page-header";
-import FilterBar, { AppliedFilterTags, FilterField, formatSearchFilterValue } from "@/components/filter-bar";
+import FilterBar, { AppliedFilterTags, FilterField, ResetFiltersButton, formatSearchFilterValue } from "@/components/filter-bar";
 import MetricGrid from "@/components/metric-grid";
 import { MetricCard } from "@/components/metric-card";
+import DataRefreshTimestamp, { getLatestDataRefreshFinishedAt } from "@/components/data-refresh-timestamp";
 
 function buildActivityFilter(search: string | null, siteType: string | null) {
   const clauses: string[] = [];
@@ -120,7 +121,7 @@ async function ActivityPage({ searchParams }: { searchParams?: Promise<SearchPar
         GROUP BY d.site_key
       )
     `;
-  const [countRows, dataRows, topSitesByActiveUsersRows, topSitesBySharesModsRows] = await Promise.all([
+  const [countRows, dataRows, topSitesByActiveUsersRows, topSitesBySharesModsRows, dataRefreshFinishedAt] = await Promise.all([
     query<any>("SELECT COUNT(*)::int AS total FROM mv_msgraph_routable_site_drives " + clause, params),
     query<any>(
       `
@@ -166,6 +167,7 @@ async function ActivityPage({ searchParams }: { searchParams?: Promise<SearchPar
       `,
       graphSummaryParams
     ),
+    getLatestDataRefreshFinishedAt("graph_ingest"),
   ]);
   const total = countRows[0]?.total || 0;
 
@@ -185,6 +187,7 @@ async function ActivityPage({ searchParams }: { searchParams?: Promise<SearchPar
       <PageHeader
         title="Activity"
         subtitle={`Based on item timestamps and cached link-permission sync observations. Window: ${windowDays ?? "all"}d.`}
+        actions={<DataRefreshTimestamp sourceLabel="Graph sync" finishedAt={dataRefreshFinishedAt} />}
       />
 
       <form action="/dashboard/activity" method="get">
@@ -229,6 +232,7 @@ async function ActivityPage({ searchParams }: { searchParams?: Promise<SearchPar
           <Button type="submit" variant="outline" className="self-end">
             Apply
           </Button>
+          <ResetFiltersButton href="/dashboard/activity" />
           <AppliedFilterTags
             tags={[
               { label: "Search", value: formatSearchFilterValue(search) },

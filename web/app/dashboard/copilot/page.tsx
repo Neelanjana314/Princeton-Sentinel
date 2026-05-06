@@ -6,10 +6,11 @@ import { redirectIfFeatureDisabled } from "@/app/lib/feature-flags";
 import { formatNumber } from "@/app/lib/format";
 import { getParam, type SearchParams } from "@/app/lib/params";
 import PageHeader from "@/components/page-header";
-import FilterBar, { AppliedFilterTags, FilterField } from "@/components/filter-bar";
+import FilterBar, { AppliedFilterTags, FilterField, ResetFiltersButton } from "@/components/filter-bar";
 import MetricGrid from "@/components/metric-grid";
 import { MetricCard } from "@/components/metric-card";
 import LocalDateTime from "@/components/local-date-time";
+import DataRefreshTimestamp, { getLatestDataRefreshFinishedAt } from "@/components/data-refresh-timestamp";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -71,6 +72,7 @@ async function CopilotPage({ searchParams }: { searchParams?: Promise<SearchPara
     appHourlyRows,
     topUserRows,
     departmentRows,
+    dataRefreshFinishedAt,
   ] = await Promise.all([
     query<any>(
       `
@@ -162,6 +164,7 @@ async function CopilotPage({ searchParams }: { searchParams?: Promise<SearchPara
       `,
       [selectedPeriodDays]
     ),
+    getLatestDataRefreshFinishedAt("copilot_usage_sync"),
   ]);
 
   const summary = summaryRows[0] || {};
@@ -212,6 +215,7 @@ async function CopilotPage({ searchParams }: { searchParams?: Promise<SearchPara
       <PageHeader
         title="Copilot Utilization"
         subtitle={`Microsoft 365 Copilot usage from Graph reports. Selected report period: ${currentRange.label}.`}
+        actions={<DataRefreshTimestamp sourceLabel="Copilot usage sync" finishedAt={dataRefreshFinishedAt} />}
       />
 
       <form action="/dashboard/copilot" method="get">
@@ -232,6 +236,7 @@ async function CopilotPage({ searchParams }: { searchParams?: Promise<SearchPara
           <Button type="submit" variant="outline" className="self-end">
             Apply
           </Button>
+          <ResetFiltersButton href="/dashboard/copilot" />
           <AppliedFilterTags tags={[{ label: "Report period", value: currentRange.label }]} />
         </FilterBar>
       </form>

@@ -10,7 +10,8 @@ import { getPagination, getParam, getSortDirection, SearchParams } from "@/app/l
 import { SitesTable } from "./sites-table";
 import { SitesSummaryGraph } from "@/components/sites-summary-graph";
 import PageHeader from "@/components/page-header";
-import FilterBar, { AppliedFilterTags, FilterField, formatSearchFilterValue } from "@/components/filter-bar";
+import FilterBar, { AppliedFilterTags, FilterField, ResetFiltersButton, formatSearchFilterValue } from "@/components/filter-bar";
+import DataRefreshTimestamp, { getLatestDataRefreshFinishedAt } from "@/components/data-refresh-timestamp";
 
 const DASHBOARD_SHAREPOINT_FILTER = `
   is_dashboard_sharepoint = true
@@ -45,7 +46,7 @@ async function SitesPage({ searchParams }: { searchParams?: Promise<SearchParams
   };
   const sortColumn = sortMap[sort] || "last_activity_dt";
   const { clause, params } = buildSearchFilter(search);
-  const [countRows, summaryRows, createdSeries, recencyRows, rows] = await Promise.all([
+  const [countRows, summaryRows, createdSeries, recencyRows, rows, dataRefreshFinishedAt] = await Promise.all([
     query<any>(
       `
       SELECT COUNT(*)::int AS total
@@ -109,6 +110,7 @@ async function SitesPage({ searchParams }: { searchParams?: Promise<SearchParams
       `,
       [...params, pageSize, offset]
     ),
+    getLatestDataRefreshFinishedAt("graph_ingest"),
   ]);
   const total = countRows[0]?.total || 0;
 
@@ -117,7 +119,11 @@ async function SitesPage({ searchParams }: { searchParams?: Promise<SearchParams
 
   return (
     <main className="ps-page">
-      <PageHeader title="SharePoint Sites" subtitle="Inventory for the same SharePoint site population shown on the dashboard overview." />
+      <PageHeader
+        title="SharePoint Sites"
+        subtitle="Inventory for the same SharePoint site population shown on the dashboard overview."
+        actions={<DataRefreshTimestamp sourceLabel="Graph sync" finishedAt={dataRefreshFinishedAt} />}
+      />
 
       <form action="/dashboard/sites" method="get">
         <FilterBar>
@@ -137,6 +143,7 @@ async function SitesPage({ searchParams }: { searchParams?: Promise<SearchParams
           <Button type="submit" variant="outline" className="self-end">
             Apply
           </Button>
+          <ResetFiltersButton href="/dashboard/sites" />
           <AppliedFilterTags
             tags={[
               { label: "Search", value: formatSearchFilterValue(search) },
