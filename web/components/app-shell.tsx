@@ -137,7 +137,7 @@ function AppShellContent({
   }, []);
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="flex min-h-screen flex-col bg-background">
       <header className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/90">
         <div className="mx-auto flex w-full max-w-7xl flex-wrap items-center justify-between gap-4 px-4 py-3 lg:px-6">
           <div className="flex min-w-0 items-center gap-4">
@@ -214,7 +214,7 @@ function AppShellContent({
           </div>
         </div>
       </header>
-      <div className="mx-auto w-full max-w-7xl px-4 py-5 lg:px-6">
+      <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-5 lg:px-6">
         {featureDisabledNotice ? (
           <Card className="mb-4 border-amber-500/30 bg-amber-500/5">
             <CardContent className="pt-6 text-sm text-foreground">
@@ -223,7 +223,24 @@ function AppShellContent({
           </Card>
         ) : null}
         {children}
-      </div>
+      </main>
+      <footer className="border-t bg-card/70">
+        <div className="mx-auto flex w-full max-w-7xl flex-col gap-3 px-4 py-4 text-xs text-muted-foreground sm:flex-row sm:flex-wrap sm:items-center sm:justify-between lg:px-6">
+          <div className="flex flex-col gap-1">
+            <p>Copyright 2026. All Rights Reserved.</p>
+            <p>Princeton Sentinel powered by Princeton IT Services</p>
+          </div>
+          <address className="flex flex-col gap-1 not-italic sm:items-end">
+            <span>Address 500 Alexander Park, #201, Princeton, NJ 08540</span>
+            <a className="hover:text-foreground" href="mailto:support.sentinel@princetonits.com">
+              Support Email: support.sentinel@princetonits.com
+            </a>
+            <a className="hover:text-foreground" href="tel:+17328324365">
+              Phone Number: +1 732-TECH-365
+            </a>
+          </address>
+        </div>
+      </footer>
     </div>
   );
 }

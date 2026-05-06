@@ -479,7 +479,7 @@ async function AgentsPage({ searchParams }: { searchParams?: Promise<SearchParam
       <PageHeader
         title="Custom Agents Telemetry and Controls"
         subtitle={`Agent telemetry via Application Insights. Window: ${currentRange.label}.`}
-        actions={<DataRefreshTimestamp sourceLabel="Copilot telemetry sync" finishedAt={dataRefreshFinishedAt} />}
+        actions={<DataRefreshTimestamp sourceLabel="Custom agent telemetry sync" finishedAt={dataRefreshFinishedAt} />}
       />
 
       {/* ── Filters ── */}
