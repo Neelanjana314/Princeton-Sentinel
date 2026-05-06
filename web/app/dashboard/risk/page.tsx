@@ -302,7 +302,7 @@ async function RiskPage({ searchParams }: { searchParams?: Promise<SearchParams>
           <FilterField label="Page size">
             <Input name="pageSize" type="number" min={10} max={200} defaultValue={String(pageSize)} className="w-24" />
           </FilterField>
-          <Button type="submit" variant="outline">
+          <Button type="submit" variant="outline" className="self-end">
             Apply
           </Button>
           <AppliedFilterTags

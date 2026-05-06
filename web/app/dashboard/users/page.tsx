@@ -286,7 +286,7 @@ async function UsersPage({ searchParams }: { searchParams?: Promise<SearchParams
               className="w-24"
             />
           </FilterField>
-          <Button type="submit" variant="outline">
+          <Button type="submit" variant="outline" className="self-end">
             Apply
           </Button>
           <AppliedFilterTags

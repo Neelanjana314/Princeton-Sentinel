@@ -120,7 +120,7 @@ async function GroupsPage({ searchParams }: { searchParams?: Promise<SearchParam
               className="w-24"
             />
           </FilterField>
-          <Button type="submit" variant="outline">
+          <Button type="submit" variant="outline" className="self-end">
             Apply
           </Button>
           <AppliedFilterTags

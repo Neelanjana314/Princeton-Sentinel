@@ -532,7 +532,7 @@ async function AgentsPage({ searchParams }: { searchParams?: Promise<SearchParam
             </select>
           </FilterField>
 
-          <Button type="submit" variant="outline">
+          <Button type="submit" variant="outline" className="self-end">
             Apply
           </Button>
           <AppliedFilterTags

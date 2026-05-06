@@ -226,7 +226,7 @@ async function ActivityPage({ searchParams }: { searchParams?: Promise<SearchPar
               className="w-24"
             />
           </FilterField>
-          <Button type="submit" variant="outline">
+          <Button type="submit" variant="outline" className="self-end">
             Apply
           </Button>
           <AppliedFilterTags
