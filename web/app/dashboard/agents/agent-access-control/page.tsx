@@ -3,16 +3,17 @@ import { requireAdmin } from "@/app/lib/auth";
 import { getCsrfRenderToken } from "@/app/lib/csrf-server";
 import { getCurrentLicenseSummary } from "@/app/lib/license";
 import { withPageRequestTiming } from "@/app/lib/request-timing";
+import { getRuntimeEnv } from "@/app/lib/runtime-env";
 import AgentAccessControlClient from "./agent-access-control-client";
 
 async function AgentAccessControlPage() {
   await requireAdmin();
   await redirectIfFeatureDisabled("agents_dashboard");
-  const [csrfToken, licenseSummary] = await Promise.all([
+  const [csrfToken, licenseSummary, columnPrefix] = await Promise.all([
     getCsrfRenderToken(),
     getCurrentLicenseSummary(),
+    getRuntimeEnv("DATAVERSE_COLUMN_PREFIX"),
   ]);
-  const columnPrefix = process.env.DATAVERSE_COLUMN_PREFIX || "";
   const canManageAccess = licenseSummary.features.job_control;
   const controlsDisabledReason =
     !canManageAccess
@@ -22,7 +23,7 @@ async function AgentAccessControlPage() {
   return (
     <AgentAccessControlClient
       csrfToken={csrfToken}
-      columnPrefix={columnPrefix}
+      columnPrefix={columnPrefix || ""}
       canManageAccess={canManageAccess}
       controlsDisabledReason={controlsDisabledReason}
     />

@@ -1,4 +1,3 @@
-import os
 import random
 import re
 from contextlib import contextmanager
@@ -6,15 +5,9 @@ from contextlib import contextmanager
 import psycopg2
 import psycopg2.extras
 
+from app.runtime_config import get_int_runtime_env, require_runtime_env
 from app.runtime_logger import emit
 
-
-DB_URL = os.getenv("DATABASE_URL")
-DB_CONNECT_TIMEOUT_SECONDS = int(os.getenv("DB_CONNECT_TIMEOUT_SECONDS", "10"))
-DB_WRITE_MAX_RETRIES = int(os.getenv("DB_WRITE_MAX_RETRIES", "6"))
-DB_WRITE_RETRY_BASE_MS = int(os.getenv("DB_WRITE_RETRY_BASE_MS", "200"))
-DB_WRITE_RETRY_MAX_MS = int(os.getenv("DB_WRITE_RETRY_MAX_MS", "3000"))
-DB_WRITE_RETRY_JITTER_MS = int(os.getenv("DB_WRITE_RETRY_JITTER_MS", "150"))
 
 RETRYABLE_DB_SQLSTATES = {"40P01", "55P03", "40001"}
 
@@ -44,9 +37,10 @@ def _classify_write_query(query: str) -> tuple[str, str]:
 
 
 def get_conn():
-    if not DB_URL:
-        raise RuntimeError("DATABASE_URL is not set")
-    return psycopg2.connect(DB_URL, connect_timeout=DB_CONNECT_TIMEOUT_SECONDS)
+    return psycopg2.connect(
+        require_runtime_env("DATABASE_URL"),
+        connect_timeout=get_int_runtime_env("DB_CONNECT_TIMEOUT_SECONDS", 10),
+    )
 
 
 @contextmanager
@@ -166,10 +160,10 @@ def is_retryable_db_error(exc: BaseException) -> bool:
 
 
 def get_db_write_retry_config():
-    max_retries = max(0, DB_WRITE_MAX_RETRIES)
-    base_ms = max(1, DB_WRITE_RETRY_BASE_MS)
-    max_ms = max(base_ms, DB_WRITE_RETRY_MAX_MS)
-    jitter_ms = max(0, DB_WRITE_RETRY_JITTER_MS)
+    max_retries = max(0, get_int_runtime_env("DB_WRITE_MAX_RETRIES", 6))
+    base_ms = max(1, get_int_runtime_env("DB_WRITE_RETRY_BASE_MS", 200))
+    max_ms = max(base_ms, get_int_runtime_env("DB_WRITE_RETRY_MAX_MS", 3000))
+    jitter_ms = max(0, get_int_runtime_env("DB_WRITE_RETRY_JITTER_MS", 150))
     return max_retries, base_ms, max_ms, jitter_ms
 
 

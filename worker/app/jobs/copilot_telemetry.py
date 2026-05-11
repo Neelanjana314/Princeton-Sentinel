@@ -17,7 +17,6 @@ Key dimensions:
 """
 
 import json
-import os
 import time
 from datetime import datetime, timezone, timedelta
 
@@ -25,18 +24,26 @@ import requests
 
 from app import db
 from app.jobs.mv_refresh import enqueue_impacted_mvs_for_tables
+from app.runtime_config import get_runtime_env
 from app.runtime_logger import emit
 from app.utils import log_job_run_log
 
-APPINSIGHTS_APP_ID = os.getenv("APPINSIGHTS_APP_ID", "")
-APPINSIGHTS_API_KEY = os.getenv("APPINSIGHTS_API_KEY", "")
 APPINSIGHTS_BASE = "https://api.applicationinsights.io/v1/apps"
+APPINSIGHTS_APP_ID = ""
+APPINSIGHTS_API_KEY = ""
 
 DEFAULT_LOOKBACK_HOURS = 24
 
 
+def _get_appinsights_credentials() -> tuple[str, str]:
+    app_id = (get_runtime_env("APPINSIGHTS_APP_ID") or APPINSIGHTS_APP_ID).strip()
+    api_key = (get_runtime_env("APPINSIGHTS_API_KEY") or APPINSIGHTS_API_KEY).strip()
+    return app_id, api_key
+
+
 def run_copilot_telemetry(*, run_id: str, job_id: str, actor=None):
-    if not APPINSIGHTS_APP_ID or not APPINSIGHTS_API_KEY:
+    appinsights_app_id, appinsights_api_key = _get_appinsights_credentials()
+    if not appinsights_app_id or not appinsights_api_key:
         emit("WARN", "COPILOT_TELEMETRY", "APPINSIGHTS_APP_ID or APPINSIGHTS_API_KEY not set, skipping")
         log_job_run_log(run_id=run_id, level="WARN", message="copilot_telemetry_skipped",
                         context={"reason": "APPINSIGHTS_APP_ID or APPINSIGHTS_API_KEY not set"})
@@ -300,8 +307,12 @@ def _fetch_tool_performance(since_iso: str) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 def _run_kql(kql: str) -> list[dict]:
-    url = f"{APPINSIGHTS_BASE}/{APPINSIGHTS_APP_ID}/query"
-    headers = {"x-api-key": APPINSIGHTS_API_KEY, "Content-Type": "application/json"}
+    appinsights_app_id, appinsights_api_key = _get_appinsights_credentials()
+    if not appinsights_app_id or not appinsights_api_key:
+        raise RuntimeError("APPINSIGHTS_APP_ID or APPINSIGHTS_API_KEY not set")
+
+    url = f"{APPINSIGHTS_BASE}/{appinsights_app_id}/query"
+    headers = {"x-api-key": appinsights_api_key, "Content-Type": "application/json"}
     body = {"query": kql}
 
     try:

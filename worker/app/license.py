@@ -1,7 +1,6 @@
 import base64
 import hashlib
 import json
-import os
 import threading
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
@@ -11,7 +10,7 @@ from cryptography.hazmat.primitives.asymmetric import padding
 
 from app import db
 from app.local_testing_state import get_local_testing_state
-from app.runtime_config import is_local_docker_deployment
+from app.runtime_config import get_runtime_env, is_local_docker_deployment
 
 
 LICENSE_SCHEMA_VERSION = 1
@@ -102,7 +101,7 @@ def _fallback_summary(error: Optional[str], **overrides) -> Dict[str, Any]:
 
 
 def _local_docker_license_summary() -> Dict[str, Any]:
-    tenant_id = _non_empty_string(os.getenv("ENTRA_TENANT_ID")) or "local-docker"
+    tenant_id = _non_empty_string(get_runtime_env("ENTRA_TENANT_ID")) or "local-docker"
     features = _fully_enabled_features()
     return {
         "status": "active",
@@ -205,7 +204,7 @@ def _parse_payload(value: Any) -> Dict[str, Any]:
 
 def _load_public_key():
     global _public_key_cache
-    public_key_path = _non_empty_string(os.getenv("LICENSE_PUBLIC_KEY_PATH"))
+    public_key_path = _non_empty_string(get_runtime_env("LICENSE_PUBLIC_KEY_PATH"))
     if not public_key_path:
         raise RuntimeError("license_public_key_path_not_configured")
     with _cache_lock:
@@ -280,7 +279,7 @@ def summarize_license_artifact(raw_license_text: str, *, artifact_id=None, uploa
             uploaded_by=metadata["uploaded_by"],
         )
 
-    tenant_id = _non_empty_string(os.getenv("ENTRA_TENANT_ID"))
+    tenant_id = _non_empty_string(get_runtime_env("ENTRA_TENANT_ID"))
     if not tenant_id:
         return _fallback_summary(
             "entra_tenant_id_not_configured",
@@ -339,7 +338,7 @@ def clear_license_cache():
 
 def get_current_license() -> Dict[str, Any]:
     global _summary_cache
-    ttl_seconds = int(os.getenv("LICENSE_CACHE_TTL_SECONDS", "300") or "300")
+    ttl_seconds = int(get_runtime_env("LICENSE_CACHE_TTL_SECONDS", "300") or "300")
     local_testing_state = get_local_testing_state() if is_local_docker_deployment() else None
     meta = None
     if local_testing_state is None:

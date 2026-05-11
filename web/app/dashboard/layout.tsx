@@ -10,8 +10,8 @@ export const dynamic = "force-dynamic";
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const session = await getSession();
   const groups = getGroupsFromSession(session);
-  const canUser = session ? isUser(groups) : false;
-  const canAdmin = session ? isAdmin(groups) : false;
+  const canUser = session ? await isUser(groups) : false;
+  const canAdmin = session ? await isAdmin(groups) : false;
 
   if (!session?.user) {
     redirect("/signin/account?callbackUrl=/dashboard");

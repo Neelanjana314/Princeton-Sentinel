@@ -1,5 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
+import { requireRuntimeEnv } from "../../../lib/runtime-env";
 export const dynamic = "force-dynamic";
 
 function isValidHeartbeatToken(provided: string, expected: string): boolean {
@@ -12,7 +13,7 @@ function isValidHeartbeatToken(provided: string, expected: string): boolean {
 }
 
 export async function POST(req: Request) {
-  const expectedToken = process.env.WORKER_HEARTBEAT_TOKEN;
+  const expectedToken = await requireRuntimeEnv("WORKER_HEARTBEAT_TOKEN");
   if (!expectedToken) {
     return NextResponse.json({ error: "WORKER_HEARTBEAT_TOKEN not set" }, { status: 500 });
   }

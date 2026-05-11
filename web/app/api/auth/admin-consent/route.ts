@@ -3,6 +3,7 @@ import { getGroupsFromSession, getSession, isAdmin } from "@/app/lib/auth";
 import { sanitizeCallbackUrl } from "@/app/lib/callback-url";
 import { getPublicRequestOrigin } from "@/app/lib/request-origin";
 import { withApiRequestTiming } from "@/app/lib/request-timing";
+import { requireRuntimeEnv } from "@/app/lib/runtime-env";
 
 export const dynamic = "force-dynamic";
 
@@ -11,10 +12,10 @@ const CONSENT_SCOPES = [
   "https://api.powerplatform.com/CopilotStudio.AdminActions.Invoke",
 ];
 
-function getRequiredEnv() {
-  const tenantId = process.env.ENTRA_TENANT_ID?.trim() || "";
-  const clientId = process.env.ENTRA_CLIENT_ID?.trim() || "";
-  const nextAuthUrl = process.env.NEXTAUTH_URL?.trim().replace(/\/+$/, "") || "";
+async function getRequiredEnv() {
+  const tenantId = (await requireRuntimeEnv("ENTRA_TENANT_ID")).trim();
+  const clientId = (await requireRuntimeEnv("ENTRA_CLIENT_ID")).trim();
+  const nextAuthUrl = (await requireRuntimeEnv("NEXTAUTH_URL")).trim().replace(/\/+$/, "");
   if (!tenantId || !clientId || !nextAuthUrl) {
     throw new Error("ENTRA_TENANT_ID, ENTRA_CLIENT_ID, and NEXTAUTH_URL must be set");
   }
@@ -31,11 +32,11 @@ const getHandler = async function GET(req: Request) {
   if (!session) {
     return NextResponse.redirect(new URL("/signin/account", req.url));
   }
-  if (!isAdmin(groups)) {
+  if (!(await isAdmin(groups))) {
     return NextResponse.redirect(new URL("/forbidden", req.url));
   }
 
-  const { tenantId, clientId, nextAuthUrl } = getRequiredEnv();
+  const { tenantId, clientId, nextAuthUrl } = await getRequiredEnv();
   const requestUrl = new URL(req.url);
   const callbackUrl = sanitizeCallbackUrl(requestUrl.searchParams.get("callbackUrl"));
   const redirectUri = `${getPublicRequestOrigin(req, nextAuthUrl)}/api/auth/admin-consent/callback`;

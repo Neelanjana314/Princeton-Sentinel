@@ -1,6 +1,5 @@
-import os
-
 from app.key_vault_env import hydrate_env_from_key_vault
+from app.runtime_config import get_bool_runtime_env
 
 hydrate_env_from_key_vault("worker")
 
@@ -12,18 +11,11 @@ app = create_app()
 _bootstrapped = False
 
 
-def _is_enabled(value: str | None, default: bool = True) -> bool:
-    if value is None:
-        return default
-    normalized = value.strip().lower()
-    return normalized in {"1", "true", "t", "yes", "y", "on"}
-
-
 def bootstrap_background_threads():
     global _bootstrapped
     if _bootstrapped:
         return
-    if not _is_enabled(os.getenv("WORKER_ENABLE_BACKGROUND_THREADS"), default=True):
+    if not get_bool_runtime_env("WORKER_ENABLE_BACKGROUND_THREADS", True):
         _bootstrapped = True
         return
     start_scheduler_thread()

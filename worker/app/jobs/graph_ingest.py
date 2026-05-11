@@ -1,6 +1,5 @@
 import hashlib
 import json
-import os
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
@@ -10,16 +9,18 @@ from urllib.parse import quote, unquote, urlparse
 from app import db
 from app.graph_client import GraphClient, GraphError
 from app.jobs.mv_refresh import enqueue_impacted_mvs_for_tables
+from app.runtime_config import get_bool_runtime_env, get_int_runtime_env, get_runtime_env
 from app.runtime_logger import emit
 from app.utils import log_audit_event, log_job_run_log
 
 
-FLUSH_EVERY_DEFAULT = int(os.getenv("FLUSH_EVERY", "500"))
-GRAPH_PAGE_SIZE = int(os.getenv("GRAPH_PAGE_SIZE", "200"))
-GRAPH_MAX_CONCURRENCY = int(os.getenv("GRAPH_MAX_CONCURRENCY", "4"))
-
-DEFAULT_PERMISSIONS_BATCH_SIZE = int(os.getenv("GRAPH_PERMISSIONS_BATCH_SIZE", "50"))
-DEFAULT_PERMISSIONS_STALE_AFTER_HOURS = int(os.getenv("GRAPH_PERMISSIONS_STALE_AFTER_HOURS", "24"))
+FLUSH_EVERY_DEFAULT = 500
+GRAPH_PAGE_SIZE_DEFAULT = 200
+GRAPH_MAX_CONCURRENCY_DEFAULT = 4
+GRAPH_PAGE_SIZE = GRAPH_PAGE_SIZE_DEFAULT
+GRAPH_MAX_CONCURRENCY = GRAPH_MAX_CONCURRENCY_DEFAULT
+DEFAULT_PERMISSIONS_BATCH_SIZE = 50
+DEFAULT_PERMISSIONS_STALE_AFTER_HOURS = 24
 
 TEST_MODE_FEATURE_KEY = "test_mode"
 TEST_MODE_GROUP_ENV = "GRAPH_SYNC_TEST_MODE_GROUP_ID"
@@ -36,20 +37,20 @@ STAGE_IMPACTED_TABLES: Dict[str, Tuple[str, ...]] = {
 }
 
 
+def _graph_page_size() -> int:
+    return get_int_runtime_env("GRAPH_PAGE_SIZE", GRAPH_PAGE_SIZE)
+
+
+def _graph_max_concurrency() -> int:
+    return get_int_runtime_env("GRAPH_MAX_CONCURRENCY", GRAPH_MAX_CONCURRENCY)
+
+
 def _env_bool(name: str, default: bool) -> bool:
-    raw = os.getenv(name)
-    if raw is None:
-        return default
-    value = raw.strip().lower()
-    if value in {"1", "true", "t", "yes", "y", "on"}:
-        return True
-    if value in {"0", "false", "f", "no", "n", "off"}:
-        return False
-    return default
+    return get_bool_runtime_env(name, default)
 
 
 def _env_csv(name: str) -> list[str]:
-    raw = (os.getenv(name) or "").strip()
+    raw = (get_runtime_env(name) or "").strip()
     if not raw:
         return []
     return [part.strip() for part in raw.split(",") if part.strip()]
@@ -57,14 +58,14 @@ def _env_csv(name: str) -> list[str]:
 
 def get_graph_sync_runtime_config() -> Dict[str, Any]:
     return {
-        "flush_every": FLUSH_EVERY_DEFAULT,
+        "flush_every": get_int_runtime_env("FLUSH_EVERY", FLUSH_EVERY_DEFAULT),
         "pull_permissions": _env_bool("GRAPH_SYNC_PULL_PERMISSIONS", True),
         "sync_group_memberships": _env_bool("GRAPH_SYNC_GROUP_MEMBERSHIPS", True),
         "group_memberships_users_only": _env_bool("GRAPH_SYNC_GROUP_MEMBERSHIPS_USERS_ONLY", True),
         "stages": _env_csv("GRAPH_SYNC_STAGES"),
         "skip_stages": _env_csv("GRAPH_SYNC_SKIP_STAGES"),
-        "permissions_batch_size": DEFAULT_PERMISSIONS_BATCH_SIZE,
-        "permissions_stale_after_hours": DEFAULT_PERMISSIONS_STALE_AFTER_HOURS,
+        "permissions_batch_size": get_int_runtime_env("GRAPH_PERMISSIONS_BATCH_SIZE", DEFAULT_PERMISSIONS_BATCH_SIZE),
+        "permissions_stale_after_hours": get_int_runtime_env("GRAPH_PERMISSIONS_STALE_AFTER_HOURS", DEFAULT_PERMISSIONS_STALE_AFTER_HOURS),
     }
 
 
@@ -166,7 +167,7 @@ def _reset_graph_sync_cursors_for_mode_change(cur) -> dict[str, int]:
 
 
 def _resolve_test_mode_scope(client: GraphClient) -> dict[str, Any]:
-    group_id = str(os.getenv(TEST_MODE_GROUP_ENV) or "").strip()
+    group_id = str(get_runtime_env(TEST_MODE_GROUP_ENV) or "").strip()
     if not group_id:
         raise RuntimeError(f"{TEST_MODE_GROUP_ENV} must be set when {TEST_MODE_FEATURE_KEY} is enabled")
 
@@ -2067,18 +2068,7 @@ def _print_drive_listing_failure(
     graph_error: GraphError,
     extra: Optional[Dict[str, Any]] = None,
 ):
-    details: Dict[str, Any] = {
-        "stage": "drives",
-        "target_kind": target_kind,
-        "target_id": target_id,
-        "status_code": graph_error.status_code,
-        "request_url": graph_error.url,
-        "error": graph_error.message,
-        "response_text": _truncate_text(graph_error.response_text, max_len=2000),
-    }
-    if extra:
-        details.update({k: v for k, v in extra.items() if v is not None})
-    print(f"[graph_ingest] drive listing failure {json.dumps(details, sort_keys=True)}", flush=True)
+    print("[graph_ingest] drive listing failure", flush=True)
 
 
 def _candidate_site_paths_from_url(site_url: str) -> list[tuple[str, str]]:
@@ -2459,7 +2449,7 @@ def _ingest_drives(
                 group_count += 1
                 try:
                     has_drive = False
-                    for drive in client.iter_paged(f"/groups/{group_id}/drives?$top={GRAPH_PAGE_SIZE}&$select={select}"):
+                    for drive in client.iter_paged(f"/groups/{group_id}/drives?$top={_graph_page_size()}&$select={select}"):
                         drive_id = drive.get("id")
                         if not drive_id:
                             continue
@@ -2519,7 +2509,7 @@ def _ingest_drives(
                 user_count += 1
                 try:
                     has_drive = False
-                    for drive in client.iter_paged(f"/users/{user_id}/drives?$top={GRAPH_PAGE_SIZE}&$select={select}"):
+                    for drive in client.iter_paged(f"/users/{user_id}/drives?$top={_graph_page_size()}&$select={select}"):
                         drive_id = drive.get("id")
                         if not drive_id:
                             continue
@@ -2640,7 +2630,7 @@ def _ingest_drives(
                 continue
             site_batch: list[tuple] = []
             try:
-                for drive in client.iter_paged(f"/sites/{site_id}/drives?$top={GRAPH_PAGE_SIZE}&$select={select}"):
+                for drive in client.iter_paged(f"/sites/{site_id}/drives?$top={_graph_page_size()}&$select={select}"):
                     if not drive.get("id"):
                         continue
                     site_batch.append(
@@ -2718,7 +2708,7 @@ def _ingest_drives(
             group_batch: list[tuple] = []
             try:
                 has_drive = False
-                for drive in client.iter_paged(f"/groups/{group_id}/drives?$top={GRAPH_PAGE_SIZE}&$select={select}"):
+                for drive in client.iter_paged(f"/groups/{group_id}/drives?$top={_graph_page_size()}&$select={select}"):
                     if not drive.get("id"):
                         continue
                     has_drive = True
@@ -2779,7 +2769,7 @@ def _ingest_drives(
             user_batch: list[tuple] = []
             try:
                 has_drive = False
-                for drive in client.iter_paged(f"/users/{user_id}/drives?$top={GRAPH_PAGE_SIZE}&$select={select}"):
+                for drive in client.iter_paged(f"/users/{user_id}/drives?$top={_graph_page_size()}&$select={select}"):
                     if not drive.get("id"):
                         continue
                     has_drive = True
@@ -3028,7 +3018,7 @@ def _ingest_drive_items(
 
         for drive_id in drive_ids:
             drive_count += 1
-            base_url = f"/drives/{drive_id}/root/delta?$top={GRAPH_PAGE_SIZE}&$select={select}"
+            base_url = f"/drives/{drive_id}/root/delta?$top={_graph_page_size()}&$select={select}"
             delta_link = _get_delta_link(cur, "drive_items", drive_id)
             next_url = delta_link or base_url
 
@@ -3700,8 +3690,8 @@ def _scan_permissions(
 
         def _collect_permission_results(keys: list[Tuple[str, str]]) -> Dict[Tuple[str, str], Dict[str, Any]]:
             results: Dict[Tuple[str, str], Dict[str, Any]] = {}
-            if GRAPH_MAX_CONCURRENCY > 1:
-                with ThreadPoolExecutor(max_workers=GRAPH_MAX_CONCURRENCY) as executor:
+            if _graph_max_concurrency() > 1:
+                with ThreadPoolExecutor(max_workers=_graph_max_concurrency()) as executor:
                     future_to_key = {
                         executor.submit(_fetch_permissions, client, drive_id, item_id): (drive_id, item_id)
                         for drive_id, item_id in keys

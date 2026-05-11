@@ -13,7 +13,6 @@ import {
   LAST_ACCOUNT_HINT_MAX_AGE_SECONDS,
   sanitizeAccountHint,
 } from "@/app/lib/account-hint";
-import { getSessionCookieName, shouldUseSecureAuthCookies } from "@/app/lib/auth-cookies";
 import { getBootScopedAuthSecret } from "@/app/lib/auth-secret";
 import { attachCsrfCookie, CSRF_REQUEST_TOKEN_HEADER, ensureCsrfToken, getCsrfCookieName } from "@/app/lib/csrf";
 import {
@@ -40,6 +39,8 @@ const ADMIN_PREFIXES = [
   "/api/copilot-quarantine",
 ];
 const USER_PREFIXES = ["/dashboard", "/sites", "/testing", "/api/graph", "/api/feature-flags", "/api/local-testing"];
+const KEY_VAULT_SCOPE = "https://vault.azure.net";
+const KEY_VAULT_UNSET_VALUE = "__PRINCETON_SENTINEL_UNSET__";
 
 type TimingMeta = {
   requestId: string;
@@ -48,12 +49,115 @@ type TimingMeta = {
   startMs: number;
 };
 
+let proxyTokenCache: { token: string; expiresAtMs: number } | null = null;
+const proxyLastKnownGood = new Map<string, string>();
+
 function isApiRequest(pathname: string) {
   return pathname.startsWith("/api/");
 }
 
 function isPublicAsset(pathname: string) {
   return /\.[^/]+$/.test(pathname);
+}
+
+function isTruthy(value: string | undefined) {
+  return Boolean(value && ["1", "true", "t", "yes", "y", "on"].includes(value.trim().toLowerCase()));
+}
+
+function isProxyKeyVaultEnabled() {
+  return Boolean(process.env.AZ_KEY_VAULT_URL?.trim()) && !isTruthy(process.env.LOCAL_DOCKER_DEPLOYMENT);
+}
+
+function parseProxyTokenExpiresAt(payload: Record<string, any>) {
+  const expiresOn = payload.expires_on ?? payload.expiresOn;
+  if (typeof expiresOn === "number") return expiresOn > 10_000_000_000 ? expiresOn : expiresOn * 1000;
+  if (typeof expiresOn === "string" && /^\d+$/.test(expiresOn)) {
+    const parsed = Number(expiresOn);
+    return parsed > 10_000_000_000 ? parsed : parsed * 1000;
+  }
+  const expiresIn = payload.expires_in ?? payload.expiresIn;
+  if (typeof expiresIn === "number") return Date.now() + expiresIn * 1000;
+  if (typeof expiresIn === "string" && /^\d+$/.test(expiresIn)) return Date.now() + Number(expiresIn) * 1000;
+  return Date.now() + 55 * 60 * 1000;
+}
+
+async function acquireProxyManagedIdentityToken() {
+  if (proxyTokenCache && Date.now() < proxyTokenCache.expiresAtMs - 60_000) {
+    return proxyTokenCache.token;
+  }
+  const endpoint = process.env.IDENTITY_ENDPOINT;
+  const identityHeader = process.env.IDENTITY_HEADER;
+  const clientId = process.env.MANAGED_IDENTITY_CLIENT_ID || process.env.AZURE_CLIENT_ID;
+  let response: Response;
+  if (endpoint && identityHeader) {
+    const url = new URL(endpoint);
+    url.searchParams.set("api-version", "2019-08-01");
+    url.searchParams.set("resource", KEY_VAULT_SCOPE);
+    if (clientId) url.searchParams.set("client_id", clientId);
+    response = await fetch(url, { headers: { "X-IDENTITY-HEADER": identityHeader, Metadata: "true" } });
+  } else {
+    const url = new URL("http://169.254.169.254/metadata/identity/oauth2/token");
+    url.searchParams.set("api-version", "2018-02-01");
+    url.searchParams.set("resource", KEY_VAULT_SCOPE);
+    if (clientId) url.searchParams.set("client_id", clientId);
+    response = await fetch(url, { headers: { Metadata: "true" } });
+  }
+  if (!response.ok) throw new Error(`managed_identity_token_failed_${response.status}`);
+  const payload = await response.json().catch(() => ({}));
+  if (!payload.access_token) throw new Error("managed_identity_token_missing_access_token");
+  proxyTokenCache = { token: payload.access_token, expiresAtMs: parseProxyTokenExpiresAt(payload) };
+  return proxyTokenCache.token;
+}
+
+async function getProxyRuntimeEnv(name: string) {
+  const existing = process.env[name];
+  if (!isProxyKeyVaultEnabled()) {
+    return existing;
+  }
+  try {
+    const vaultUrl = String(process.env.AZ_KEY_VAULT_URL || "").trim().replace(/\/+$/, "");
+    const secretName = name.replaceAll("_", "-");
+    const token = await acquireProxyManagedIdentityToken();
+    const response = await fetch(`${vaultUrl}/secrets/${encodeURIComponent(secretName)}?api-version=7.4`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (response.status === 404) {
+      proxyLastKnownGood.delete(name);
+      return undefined;
+    }
+    if (!response.ok) throw new Error(`key_vault_secret_lookup_failed_${name}_${response.status}`);
+    const payload = await response.json().catch(() => ({}));
+    const value = typeof payload.value === "string" ? payload.value : "";
+    if (!value.trim() || value === KEY_VAULT_UNSET_VALUE) {
+      proxyLastKnownGood.delete(name);
+      return undefined;
+    }
+    proxyLastKnownGood.set(name, value);
+    return value;
+  } catch (error) {
+    const stale = proxyLastKnownGood.get(name) || (existing?.trim() ? existing : undefined);
+    if (stale) {
+      console.warn(`Key Vault runtime config lookup failed for ${name}; using last-known-good value`);
+      return stale;
+    }
+    throw error;
+  }
+}
+
+async function shouldUseSecureProxyAuthCookies() {
+  const authUrl = (await getProxyRuntimeEnv("NEXTAUTH_URL")) || process.env.AUTH_URL;
+  if (authUrl) {
+    try {
+      return new URL(authUrl).protocol === "https:";
+    } catch {
+      return authUrl.startsWith("https://");
+    }
+  }
+  return Boolean(process.env.VERCEL);
+}
+
+async function getProxySessionCookieName() {
+  return `${(await shouldUseSecureProxyAuthCookies()) ? "__Host-" : ""}next-auth.session-token`;
 }
 
 function createContentSecurityPolicyNonce() {
@@ -135,13 +239,13 @@ function clearLastAccountHintCookie(response: NextResponse) {
   });
 }
 
-function setLastAccountHintCookie(response: NextResponse, hint: string) {
+async function setLastAccountHintCookie(response: NextResponse, hint: string) {
   response.cookies.set({
     name: LAST_ACCOUNT_HINT_COOKIE,
     value: hint,
     httpOnly: true,
     sameSite: "strict",
-    secure: shouldUseSecureAuthCookies(),
+    secure: await shouldUseSecureProxyAuthCookies(),
     path: "/",
     maxAge: LAST_ACCOUNT_HINT_MAX_AGE_SECONDS,
   });
@@ -164,14 +268,14 @@ export async function proxy(req: NextRequest) {
     const token = await getToken({
       req,
       secret: getBootScopedAuthSecret(),
-      secureCookie: shouldUseSecureAuthCookies(),
-      cookieName: getSessionCookieName(),
+      secureCookie: await shouldUseSecureProxyAuthCookies(),
+      cookieName: await getProxySessionCookieName(),
     });
     const accountHint = sanitizeAccountHint(
       typeof token?.upn === "string" ? token.upn : typeof token?.email === "string" ? token.email : undefined,
     );
     if (accountHint) {
-      setLastAccountHintCookie(response, accountHint);
+      await setLastAccountHintCookie(response, accountHint);
     } else {
       clearLastAccountHintCookie(response);
     }
@@ -193,8 +297,8 @@ export async function proxy(req: NextRequest) {
   const token = await getToken({
     req,
     secret: getBootScopedAuthSecret(),
-    secureCookie: shouldUseSecureAuthCookies(),
-    cookieName: getSessionCookieName(),
+    secureCookie: await shouldUseSecureProxyAuthCookies(),
+    cookieName: await getProxySessionCookieName(),
   });
   if (!token) {
     if (isApiRequest(pathname)) {
@@ -210,8 +314,10 @@ export async function proxy(req: NextRequest) {
   }
 
   const groups = (token.groups as string[]) || [];
-  const adminGroup = process.env.ADMIN_GROUP_ID;
-  const userGroup = process.env.USER_GROUP_ID;
+  const [adminGroup, userGroup] = await Promise.all([
+    getProxyRuntimeEnv("ADMIN_GROUP_ID"),
+    getProxyRuntimeEnv("USER_GROUP_ID"),
+  ]);
   const isAdmin = adminGroup ? groups.includes(adminGroup) : false;
   const isUser = isAdmin || (userGroup ? groups.includes(userGroup) : false);
   const existingCsrfToken = req.cookies.get(getCsrfCookieName())?.value;

@@ -14,6 +14,7 @@ import { RiskSummaryBarChartClient, RiskSummaryPieChartClient } from "@/componen
 import PageHeader from "@/components/page-header";
 import FilterBar, { AppliedFilterTags, FilterField, ResetFiltersButton, formatSearchFilterValue } from "@/components/filter-bar";
 import DataRefreshTimestamp, { getLatestDataRefreshFinishedAt } from "@/components/data-refresh-timestamp";
+import { getRuntimeEnv } from "@/app/lib/runtime-env";
 
 function buildSearchFilter(search: string | null) {
   if (!search) return { clause: "", params: [] as any[] };
@@ -34,10 +35,11 @@ async function RiskPage({ searchParams }: { searchParams?: Promise<SearchParams>
   await requireUser();
 
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
-  const internalDomainPatterns = getInternalDomainPatterns();
+  const internalDomainPatterns = await getInternalDomainPatterns();
+  const dormantLookbackDays = await getRuntimeEnv("DASHBOARD_DORMANT_LOOKBACK_DAYS");
 
   const search = getParam(resolvedSearchParams, "q");
-  const dormantDays = Number(getParam(resolvedSearchParams, "dormantDays") || process.env.DASHBOARD_DORMANT_LOOKBACK_DAYS || 90);
+  const dormantDays = Number(getParam(resolvedSearchParams, "dormantDays") || dormantLookbackDays || 90);
   const windowDays = getWindowDays(resolvedSearchParams, 90);
   const windowStart = windowDays ? new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000).toISOString() : null;
   const { page, pageSize } = getPagination(resolvedSearchParams, { page: 1, pageSize: 50 });

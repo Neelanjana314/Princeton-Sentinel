@@ -87,7 +87,7 @@ export const dynamic = "force-dynamic";
 
 async function ItemDetailPage({ params }: { params: Promise<{ itemId: string }> }) {
   const { groups } = await requireUser();
-  const admin = isAdmin(groups);
+  const admin = await isAdmin(groups);
   const csrfToken = await getCsrfRenderToken();
 
   const { itemId: encodedItemId } = await params;
@@ -125,7 +125,7 @@ async function ItemDetailPage({ params }: { params: Promise<{ itemId: string }> 
     liveError = err?.message || "Failed to load live Graph data";
   }
 
-  const patterns = getInternalDomainPatterns();
+  const patterns = await getInternalDomainPatterns();
   const linkBreakdownMap = new Map<string, { link_scope: string | null; link_type: string | null; count: number }>();
   const accessLinks: any[] = [];
   const permissions: any[] = [];

@@ -17,7 +17,7 @@ type Props = {
 export const dynamic = "force-dynamic";
 
 async function SignInAccountPage({ searchParams }: Props) {
-  const session = await getServerSession(getAuthOptions());
+  const session = await getServerSession(await getAuthOptions());
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
   const callbackUrl = sanitizeCallbackUrl(resolvedSearchParams?.callbackUrl);
   const error = typeof resolvedSearchParams?.error === "string" ? resolvedSearchParams.error : undefined;

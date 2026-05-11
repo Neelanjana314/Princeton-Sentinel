@@ -65,7 +65,7 @@ async function DriveSharingPage({ params }: { params: Promise<{ driveId: string 
     [driveId]
   );
 
-  const patterns = getInternalDomainPatterns();
+  const patterns = await getInternalDomainPatterns();
   const externalPrincipals = await query<any>(
     `
     WITH grants AS (
