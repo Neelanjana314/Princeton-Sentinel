@@ -1,0 +1,58 @@
+{
+  "services": {
+    "web": {
+      "required": [
+        "ADMIN_GROUP_ID",
+        "DASHBOARD_DORMANT_LOOKBACK_DAYS",
+        "DATABASE_URL",
+        "DATAVERSE_BASE_URL",
+        "DATAVERSE_COLUMN_PREFIX",
+        "DATAVERSE_TABLE_URL",
+        "ENTRA_CLIENT_ID",
+        "ENTRA_CLIENT_SECRET",
+        "ENTRA_TENANT_ID",
+        "INTERNAL_EMAIL_DOMAINS",
+        "USER_GROUP_ID",
+        "WORKER_HEARTBEAT_TOKEN",
+        "WORKER_INTERNAL_API_TOKEN"
+      ],
+      "optional": [
+        "DATAVERSE_AGENT_SECURITY_GROUP_MAPPING_TABLE_URL",
+        "LICENSE_CACHE_TTL_SECONDS",
+        "LICENSE_PUBLIC_KEY_PATH",
+        "NEXTAUTH_URL",
+        "POWER_PLATFORM_ENVIRONMENT_ID",
+        "WORKER_API_URL"
+      ]
+    },
+    "worker": {
+      "required": [
+        "DATABASE_URL",
+        "DB_CONNECT_TIMEOUT_SECONDS",
+        "ENTRA_CLIENT_ID",
+        "ENTRA_CLIENT_SECRET",
+        "ENTRA_TENANT_ID",
+        "FLUSH_EVERY",
+        "GRAPH_BASE",
+        "GRAPH_CONNECT_TIMEOUT",
+        "GRAPH_MAX_CONCURRENCY",
+        "GRAPH_MAX_RETRIES",
+        "GRAPH_PAGE_SIZE",
+        "GRAPH_PERMISSIONS_BATCH_SIZE",
+        "GRAPH_PERMISSIONS_STALE_AFTER_HOURS",
+        "GRAPH_READ_TIMEOUT",
+        "INTERNAL_EMAIL_DOMAINS",
+        "SCHEDULER_POLL_SECONDS",
+        "WORKER_HEARTBEAT_TOKEN",
+        "WORKER_INTERNAL_API_TOKEN"
+      ],
+      "optional": [
+        "APPINSIGHTS_API_KEY",
+        "APPINSIGHTS_APP_ID",
+        "LICENSE_CACHE_TTL_SECONDS",
+        "LICENSE_PUBLIC_KEY_PATH",
+        "WORKER_HEARTBEAT_URL"
+      ]
+    }
+  }
+}

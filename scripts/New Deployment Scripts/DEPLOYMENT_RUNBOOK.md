@@ -13,6 +13,7 @@ Database-executing phases require either:
 - Uses a client-tenant Azure Container Registry.
 - New ACRs created by this suite use ACR admin credentials stored on the Container Apps, matching the staging deployment model.
 - Existing ACRs reused by this suite use Container App managed identity and `AcrPull`.
+- Runtime configuration is stored in Azure Key Vault and loaded by the web and worker apps at startup through managed identity.
 - During init, you can either:
   - reuse an existing client-tenant ACR
   - create a new Basic ACR in the deployment resource group
@@ -83,6 +84,7 @@ Prompts for:
 Creates or confirms:
 
 - resource group, or validates the existing resource group selected during init
+- Azure Key Vault with RBAC enabled
 - Log Analytics workspace
 - Container Apps environment
 - Application Insights component
@@ -93,6 +95,7 @@ Creates or confirms:
 - creation of a new Basic ACR when selected during init
 - for newly created ACRs: admin credentials enabled and stored on the web and worker Container Apps during deployment
 - for existing managed-identity ACRs: `AcrPull` role assignment on the selected ACR for the web and worker Container Apps
+- `Key Vault Secrets User` role assignment on the Key Vault for the web and worker Container App managed identities
 
 Required Azure access for existing managed-identity ACRs:
 
@@ -108,6 +111,7 @@ Expected output:
 
 - Azure names and FQDNs saved into state
 - generated PostgreSQL admin password and `DATABASE_URL` saved into state
+- Key Vault name and URL saved into state
 
 ### 3. Bootstrap the database
 
@@ -186,6 +190,7 @@ Generated automatically unless you override them:
 Expected output:
 
 - complete runtime env snapshot written to the state directory
+- deploy phases write runtime values to Key Vault using names like `DATABASE-URL` for `DATABASE_URL`
 
 ### 6. Build and push the web image
 
@@ -218,6 +223,7 @@ Run:
 Behavior:
 
 - reuses the staging config sync logic
+- writes runtime config values to Key Vault before syncing the web Container App
 - the web app generates a fresh boot-scoped auth secret on every startup, invalidating prior sessions after restart or redeploy
 - mounts the local license public key into the web Container App as a secret volume
 - updates ingress to the real web port `3000`
@@ -259,6 +265,7 @@ Run:
 Behavior:
 
 - reuses the staging worker config sync logic
+- writes runtime config values to Key Vault before syncing the worker Container App
 - mounts the same public key secret volume for license verification
 - updates ingress to the real worker port `5000`
 - updates the worker Container App to the newly built image

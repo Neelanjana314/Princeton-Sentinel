@@ -25,6 +25,7 @@ from deployment_lib import (  # noqa: E402
     DEPLOYMENT_SUITE_ROOT,
     PLACEHOLDER_IMAGE,
     REQUIRED_RUNTIME_FIELDS,
+    RUNTIME_ENV_MANIFEST_PATH,
     BaseIO,
     ConsoleIO,
     DEPLOYMENTS_ROOT,
@@ -84,6 +85,7 @@ SMART_DETECTOR_ALERT_RULES_API_VERSION = "2021-04-01"
 POSTGRES_CREATE_RETRY_ATTEMPTS = 3
 POSTGRES_CREATE_RETRY_BACKOFF_SECONDS = 10
 REQUIRED_WEB_PUBLIC_ASSETS = ("pis-logo.png", "pits-white-logo.png")
+KEY_VAULT_UNSET_VALUE = "__PRINCETON_SENTINEL_UNSET__"
 
 
 def phase_name(key: str) -> str:
@@ -171,6 +173,98 @@ def ensure_az_login(state: dict[str, Any], *, dry_run: bool, io: BaseIO) -> None
 def ensure_containerapp_extension(*, dry_run: bool, io: BaseIO) -> None:
     run_command(["az", "config", "set", "extension.use_dynamic_install=yes_without_prompt"], dry_run=dry_run, io=io)
     run_command(["az", "extension", "add", "--name", "containerapp", "--upgrade"], dry_run=dry_run, io=io)
+
+
+def load_runtime_env_manifest() -> dict[str, Any]:
+    return json.loads(RUNTIME_ENV_MANIFEST_PATH.read_text(encoding="utf-8"))
+
+
+def runtime_manifest_keys() -> list[str]:
+    manifest = load_runtime_env_manifest()
+    names: list[str] = []
+    for service in (manifest.get("services") or {}).values():
+        for key in [*(service.get("required") or []), *(service.get("optional") or [])]:
+            if key not in names:
+                names.append(key)
+    return names
+
+
+def key_vault_secret_name(key: str) -> str:
+    return key.replace("_", "-")
+
+
+def ensure_key_vault_defaults(state: dict[str, Any]) -> None:
+    azure = state.setdefault("azure", {})
+    client_slug = state.get("client_slug") or "client"
+    azure.setdefault("key_vault_name", normalize_resource_name(f"kv-{client_slug}", max_length=24))
+    if azure.get("key_vault_name") and not azure.get("key_vault_url"):
+        azure["key_vault_url"] = f"https://{azure['key_vault_name']}.vault.azure.net"
+
+
+def ensure_key_vault(state: dict[str, Any], *, dry_run: bool, io: BaseIO) -> None:
+    azure = state["azure"]
+    ensure_key_vault_defaults(state)
+    ensure_provider_registered("Microsoft.KeyVault", dry_run=dry_run, io=io)
+    if dry_run:
+        run_command(
+            [
+                "az",
+                "keyvault",
+                "create",
+                "--name",
+                azure["key_vault_name"],
+                "--resource-group",
+                azure["resource_group"],
+                "--location",
+                azure["location"],
+                "--enable-rbac-authorization",
+                "true",
+            ],
+            dry_run=True,
+            io=io,
+        )
+        return
+
+    existing = run_and_capture_or_default(
+        [
+            "az",
+            "keyvault",
+            "show",
+            "--name",
+            azure["key_vault_name"],
+            "--query",
+            "properties.vaultUri",
+            "-o",
+            "tsv",
+        ],
+        io=io,
+        default="",
+    ).strip()
+    if existing:
+        azure["key_vault_url"] = existing.rstrip("/")
+        return
+
+    vault_uri = run_and_capture(
+        [
+            "az",
+            "keyvault",
+            "create",
+            "--name",
+            azure["key_vault_name"],
+            "--resource-group",
+            azure["resource_group"],
+            "--location",
+            azure["location"],
+            "--enable-rbac-authorization",
+            "true",
+            "--query",
+            "properties.vaultUri",
+            "-o",
+            "tsv",
+        ],
+        io=io,
+    )
+    azure["key_vault_url"] = vault_uri.rstrip("/")
 
 
 def ensure_provider_registered(namespace: str, *, dry_run: bool, io: BaseIO) -> None:
@@ -1272,6 +1366,103 @@ def ensure_acrpull_assignment(state: dict[str, Any], app_key: str, *, dry_run: b
             ) from exc
 
 
+def ensure_key_vault_access_assignment(state: dict[str, Any], app_key: str, *, dry_run: bool, io: BaseIO) -> None:
+    azure = state["azure"]
+    ensure_key_vault_defaults(state)
+    app_name = azure[f"{app_key}_app_name"]
+    if dry_run:
+        return
+    principal_id = run_and_capture(
+        [
+            "az",
+            "containerapp",
+            "show",
+            "--name",
+            app_name,
+            "--resource-group",
+            azure["resource_group"],
+            "--query",
+            "identity.principalId",
+            "-o",
+            "tsv",
+        ],
+        io=io,
+    )
+    if not principal_id:
+        principal_id = run_and_capture(
+            [
+                "az",
+                "containerapp",
+                "identity",
+                "assign",
+                "--name",
+                app_name,
+                "--resource-group",
+                azure["resource_group"],
+                "--system-assigned",
+                "--query",
+                "principalId",
+                "-o",
+                "tsv",
+            ],
+            io=io,
+        )
+    vault_id = run_and_capture(
+        [
+            "az",
+            "keyvault",
+            "show",
+            "--name",
+            azure["key_vault_name"],
+            "--query",
+            "id",
+            "-o",
+            "tsv",
+        ],
+        io=io,
+    )
+    existing = run_and_capture(
+        [
+            "az",
+            "role",
+            "assignment",
+            "list",
+            "--scope",
+            vault_id,
+            "--query",
+            f"[?principalId=='{principal_id}' && roleDefinitionName=='Key Vault Secrets User'] | length(@)",
+            "-o",
+            "tsv",
+        ],
+        io=io,
+    )
+    if existing != "0":
+        return
+    command = [
+        "az",
+        "role",
+        "assignment",
+        "create",
+        "--assignee-object-id",
+        principal_id,
+        "--assignee-principal-type",
+        "ServicePrincipal",
+        "--role",
+        "Key Vault Secrets User",
+        "--scope",
+        vault_id,
+    ]
+    try:
+        run_command(command, io=io)
+    except subprocess.CalledProcessError as exc:
+        details = "\n".join(part for part in [exc.stderr or "", exc.stdout or ""] if part).strip()
+        raise DeploymentError(
+            f"Unable to grant Key Vault access to Container App `{app_name}`.\n"
+            f"Ask an Azure Owner or User Access Administrator to run:\n{shlex.join(command)}\n"
+            f"Azure response:\n{details or str(exc)}"
+        ) from exc
+
+
 def wait_for_database(state: dict[str, Any], *, io: BaseIO) -> None:
     database_url = state["database"]["database_url"]
     ensure_sql_executor_available(io=io)
@@ -1395,6 +1586,7 @@ def ensure_runtime_defaults(state: dict[str, Any]) -> None:
 
 def runtime_env_for_scripts(state: dict[str, Any]) -> dict[str, str]:
     ensure_runtime_defaults(state)
+    ensure_key_vault_defaults(state)
     azure = state["azure"]
     runtime = state["runtime"]
     source = state["source"]
@@ -1404,41 +1596,9 @@ def runtime_env_for_scripts(state: dict[str, Any]) -> dict[str, str]:
         "AZ_ACR_NAME": azure["acr_name"],
         "AZ_WEB_APP_NAME": azure["web_app_name"],
         "AZ_WORKER_APP_NAME": azure["worker_app_name"],
-        "STG_DATABASE_URL": runtime["DATABASE_URL"],
-        "STG_DATAVERSE_BASE_URL": runtime["DATAVERSE_BASE_URL"],
-        "STG_POWER_PLATFORM_ENVIRONMENT_ID": runtime.get("POWER_PLATFORM_ENVIRONMENT_ID", ""),
-        "STG_DATAVERSE_TABLE_URL": runtime["DATAVERSE_TABLE_URL"],
-        "STG_DATAVERSE_COLUMN_PREFIX": runtime["DATAVERSE_COLUMN_PREFIX"],
-        "STG_DATAVERSE_AGENT_SECURITY_GROUP_MAPPING_TABLE_URL": runtime.get(
-            "DATAVERSE_AGENT_SECURITY_GROUP_MAPPING_TABLE_URL", ""
-        ),
-        "STG_ENTRA_CLIENT_SECRET": runtime["ENTRA_CLIENT_SECRET"],
-        "STG_WORKER_INTERNAL_API_TOKEN": runtime["WORKER_INTERNAL_API_TOKEN"],
-        "STG_WORKER_HEARTBEAT_TOKEN": runtime["WORKER_HEARTBEAT_TOKEN"],
-        "STG_NEXTAUTH_URL": runtime["NEXTAUTH_URL"],
-        "STG_WORKER_API_URL": runtime["WORKER_API_URL"],
-        "STG_WORKER_HEARTBEAT_URL": runtime["WORKER_HEARTBEAT_URL"],
-        "STG_ENTRA_TENANT_ID": runtime["ENTRA_TENANT_ID"],
-        "STG_ENTRA_CLIENT_ID": runtime["ENTRA_CLIENT_ID"],
-        "STG_ADMIN_GROUP_ID": runtime["ADMIN_GROUP_ID"],
-        "STG_USER_GROUP_ID": runtime["USER_GROUP_ID"],
-        "STG_INTERNAL_EMAIL_DOMAINS": runtime["INTERNAL_EMAIL_DOMAINS"],
-        "STG_DASHBOARD_DORMANT_LOOKBACK_DAYS": runtime["DASHBOARD_DORMANT_LOOKBACK_DAYS"],
-        "STG_APPINSIGHTS_APP_ID": runtime["APPINSIGHTS_APP_ID"],
-        "STG_APPINSIGHTS_API_KEY": runtime["APPINSIGHTS_API_KEY"],
-        "STG_LICENSE_PUBLIC_KEY_PATH": runtime["LICENSE_PUBLIC_KEY_PATH"],
-        "STG_LICENSE_CACHE_TTL_SECONDS": runtime["LICENSE_CACHE_TTL_SECONDS"],
-        "STG_DB_CONNECT_TIMEOUT_SECONDS": runtime["DB_CONNECT_TIMEOUT_SECONDS"],
-        "STG_SCHEDULER_POLL_SECONDS": runtime["SCHEDULER_POLL_SECONDS"],
-        "STG_GRAPH_BASE": runtime["GRAPH_BASE"],
-        "STG_GRAPH_MAX_CONCURRENCY": runtime["GRAPH_MAX_CONCURRENCY"],
-        "STG_GRAPH_MAX_RETRIES": runtime["GRAPH_MAX_RETRIES"],
-        "STG_GRAPH_CONNECT_TIMEOUT": runtime["GRAPH_CONNECT_TIMEOUT"],
-        "STG_GRAPH_READ_TIMEOUT": runtime["GRAPH_READ_TIMEOUT"],
-        "STG_GRAPH_PAGE_SIZE": runtime["GRAPH_PAGE_SIZE"],
-        "STG_GRAPH_PERMISSIONS_BATCH_SIZE": runtime["GRAPH_PERMISSIONS_BATCH_SIZE"],
-        "STG_GRAPH_PERMISSIONS_STALE_AFTER_HOURS": runtime["GRAPH_PERMISSIONS_STALE_AFTER_HOURS"],
-        "STG_FLUSH_EVERY": runtime["FLUSH_EVERY"],
+        "AZ_KEY_VAULT_URL": azure["key_vault_url"],
+        "NEXTAUTH_URL": runtime["NEXTAUTH_URL"],
+        "WORKER_API_URL": runtime["WORKER_API_URL"],
         "WORKER_HEARTBEAT_URL": runtime["WORKER_HEARTBEAT_URL"],
     }
     return environment
@@ -1447,80 +1607,87 @@ def runtime_env_for_scripts(state: dict[str, Any]) -> dict[str, str]:
 def validate_runtime_ready(state: dict[str, Any]) -> None:
     ensure_runtime_defaults(state)
     runtime = state["runtime"]
-    missing = [field for field in REQUIRED_RUNTIME_FIELDS if not runtime.get(field)]
+    manifest = load_runtime_env_manifest()
+    manifest_required = []
+    for service in (manifest.get("services") or {}).values():
+        manifest_required.extend(service.get("required") or [])
+    required_fields = list(dict.fromkeys([*REQUIRED_RUNTIME_FIELDS, *manifest_required]))
+    missing = [field for field in required_fields if not runtime.get(field)]
     if missing:
         raise DeploymentError(f"Runtime configuration is incomplete. Missing: {', '.join(missing)}")
+
+
+def key_vault_runtime_values(state: dict[str, Any]) -> dict[str, str]:
+    ensure_runtime_defaults(state)
+    runtime = state["runtime"]
+    database = state.get("database", {})
+    values: dict[str, str] = {}
+    for key in runtime_manifest_keys():
+        if key == "DATABASE_URL":
+            values[key] = str(runtime.get(key) or database.get("database_url") or "")
+        else:
+            values[key] = str(runtime.get(key) or "")
+    return values
+
+
+def sync_key_vault_runtime_config(state: dict[str, Any], *, dry_run: bool, io: BaseIO) -> None:
+    ensure_key_vault_defaults(state)
+    validate_runtime_ready(state)
+    azure = state["azure"]
+    for key, value in key_vault_runtime_values(state).items():
+        secret_value = value if value else KEY_VAULT_UNSET_VALUE
+        run_command(
+            [
+                "az",
+                "keyvault",
+                "secret",
+                "set",
+                "--vault-name",
+                azure["key_vault_name"],
+                "--name",
+                key_vault_secret_name(key),
+                "--value",
+                secret_value,
+            ],
+            dry_run=dry_run,
+            io=io,
+            secrets_to_mask=[secret_value],
+        )
 
 
 def sync_web_config(state: dict[str, Any], *, dry_run: bool, io: BaseIO) -> None:
     env = runtime_env_for_scripts(state)
     validate_runtime_ready(state)
+    sync_key_vault_runtime_config(state, dry_run=dry_run, io=io)
     run_command(
-        [
-            "scripts/ci/validate-required-env.sh",
-            "STG_DATABASE_URL",
-            "STG_ENTRA_CLIENT_SECRET",
-            "STG_WORKER_INTERNAL_API_TOKEN",
-            "STG_WORKER_HEARTBEAT_TOKEN",
-            "STG_ENTRA_TENANT_ID",
-            "STG_ENTRA_CLIENT_ID",
-            "STG_ADMIN_GROUP_ID",
-            "STG_USER_GROUP_ID",
-            "STG_INTERNAL_EMAIL_DOMAINS",
-            "STG_DASHBOARD_DORMANT_LOOKBACK_DAYS",
-        ],
+        ["scripts/ci/validate-required-env.sh", "AZ_KEY_VAULT_URL"],
         env=env,
         dry_run=dry_run,
         io=io,
-        secrets_to_mask=[env["STG_DATABASE_URL"], env["STG_ENTRA_CLIENT_SECRET"], env["STG_WORKER_INTERNAL_API_TOKEN"], env["STG_WORKER_HEARTBEAT_TOKEN"]],
     )
     run_command(
         ["scripts/ci/sync-staging-web-config.sh"],
         env=env,
         dry_run=dry_run,
         io=io,
-        secrets_to_mask=[env["STG_DATABASE_URL"], env["STG_ENTRA_CLIENT_SECRET"], env["STG_WORKER_INTERNAL_API_TOKEN"], env["STG_WORKER_HEARTBEAT_TOKEN"]],
     )
 
 
 def sync_worker_config(state: dict[str, Any], *, dry_run: bool, io: BaseIO) -> None:
     env = runtime_env_for_scripts(state)
     validate_runtime_ready(state)
+    sync_key_vault_runtime_config(state, dry_run=dry_run, io=io)
     run_command(
-        [
-            "scripts/ci/validate-required-env.sh",
-            "STG_DATABASE_URL",
-            "STG_APPINSIGHTS_API_KEY",
-            "STG_ENTRA_CLIENT_SECRET",
-            "STG_WORKER_INTERNAL_API_TOKEN",
-            "STG_WORKER_HEARTBEAT_TOKEN",
-            "STG_APPINSIGHTS_APP_ID",
-            "STG_ENTRA_TENANT_ID",
-            "STG_ENTRA_CLIENT_ID",
-            "STG_INTERNAL_EMAIL_DOMAINS",
-            "STG_DB_CONNECT_TIMEOUT_SECONDS",
-            "STG_SCHEDULER_POLL_SECONDS",
-            "STG_GRAPH_BASE",
-            "STG_GRAPH_MAX_CONCURRENCY",
-            "STG_GRAPH_MAX_RETRIES",
-            "STG_GRAPH_CONNECT_TIMEOUT",
-            "STG_GRAPH_READ_TIMEOUT",
-            "STG_GRAPH_PAGE_SIZE",
-            "STG_GRAPH_PERMISSIONS_BATCH_SIZE",
-            "STG_GRAPH_PERMISSIONS_STALE_AFTER_HOURS",
-            "STG_FLUSH_EVERY",
-        ],
+        ["scripts/ci/validate-required-env.sh", "AZ_KEY_VAULT_URL"],
         env=env,
         dry_run=dry_run,
         io=io,
-        secrets_to_mask=[env["STG_DATABASE_URL"], env["STG_APPINSIGHTS_API_KEY"], env["STG_ENTRA_CLIENT_SECRET"], env["STG_WORKER_INTERNAL_API_TOKEN"], env["STG_WORKER_HEARTBEAT_TOKEN"]],
     )
     run_command(
         ["scripts/ci/sync-staging-worker-config.sh"],
         env=env,
         dry_run=dry_run,
         io=io,
-        secrets_to_mask=[env["STG_DATABASE_URL"], env["STG_APPINSIGHTS_API_KEY"], env["STG_ENTRA_CLIENT_SECRET"], env["STG_WORKER_INTERNAL_API_TOKEN"], env["STG_WORKER_HEARTBEAT_TOKEN"]],
     )
 
 
@@ -1842,6 +2009,7 @@ def phase_provision(state: dict[str, Any], *, dry_run: bool, io: BaseIO) -> dict
     ensure_provider_registered("Microsoft.Insights", dry_run=dry_run, io=io)
     ensure_provider_registered("Microsoft.DBforPostgreSQL", dry_run=dry_run, io=io)
     ensure_resource_group(state, dry_run=dry_run, io=io)
+    ensure_key_vault(state, dry_run=dry_run, io=io)
     ensure_acr(state, dry_run=dry_run, io=io)
     ensure_log_analytics_workspace(state, dry_run=dry_run, io=io)
     ensure_containerapp_environment(state, dry_run=dry_run, io=io)
@@ -1851,6 +2019,8 @@ def phase_provision(state: dict[str, Any], *, dry_run: bool, io: BaseIO) -> dict
     ensure_containerapp(state, "worker", dry_run=dry_run, io=io)
     ensure_acrpull_assignment(state, "web", dry_run=dry_run, io=io)
     ensure_acrpull_assignment(state, "worker", dry_run=dry_run, io=io)
+    ensure_key_vault_access_assignment(state, "web", dry_run=dry_run, io=io)
+    ensure_key_vault_access_assignment(state, "worker", dry_run=dry_run, io=io)
     ensure_runtime_defaults(state)
     persist(state, "provision")
     return state

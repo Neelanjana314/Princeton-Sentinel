@@ -497,7 +497,7 @@ class DeployClientEnvironmentTests(unittest.TestCase):
         self.assertEqual(snapshot["AZ_ACR_ACCESS_MODE"], "managed-identity")
         self.assertEqual(snapshot["AZ_ACR_PROVISIONING_MODE"], "create-basic")
 
-    def test_runtime_env_for_scripts_includes_split_dataverse_variables(self):
+    def test_runtime_env_for_scripts_includes_key_vault_contract(self):
         source = {
             "app_version": "3.3.0",
             "staging_version_source": ".github/workflows/deploy-staging.yml",
@@ -527,38 +527,28 @@ class DeployClientEnvironmentTests(unittest.TestCase):
 
         env = deploy_client_environment.runtime_env_for_scripts(state)
 
-        self.assertEqual(env["STG_DATAVERSE_BASE_URL"], "https://org.crm.dynamics.com")
-        self.assertEqual(env["STG_POWER_PLATFORM_ENVIRONMENT_ID"], "env-123")
-        self.assertEqual(env["STG_DATAVERSE_TABLE_URL"], "https://org.crm.dynamics.com/api/data/v9.2/cr6c3_table11s")
-        self.assertEqual(env["STG_DATAVERSE_COLUMN_PREFIX"], "cr6c3")
-        self.assertEqual(
-            env["STG_DATAVERSE_AGENT_SECURITY_GROUP_MAPPING_TABLE_URL"],
-            "https://org.crm.dynamics.com/api/data/v9.2/cr6c3_agentsecuritygroupmappings",
-        )
+        self.assertEqual(env["AZ_KEY_VAULT_URL"], state["azure"]["key_vault_url"])
+        self.assertEqual(env["NEXTAUTH_URL"], "https://web.example.com")
+        self.assertEqual(env["WORKER_API_URL"], "https://worker.example.com")
+        self.assertEqual(env["WORKER_HEARTBEAT_URL"], "https://web.example.com/api/internal/worker-heartbeat")
+        self.assertFalse(any(key.startswith("STG_") for key in env))
 
-    def test_deploy_staging_workflow_exports_dataverse_base_url_for_web_steps(self):
+    def test_deploy_staging_workflow_uses_key_vault_instead_of_stg_runtime_config(self):
         workflow = (ROOT / ".github" / "workflows" / "deploy-staging.yml").read_text()
-        removed_staging_secret = "STG_" + "NEXTAUTH" + "_SECRET"
 
         validate_block = workflow.split("      - name: Validate web staging runtime config", maxsplit=1)[1].split(
             "      - name: Sync web staging runtime config",
             maxsplit=1,
         )[0]
-        self.assertIn("STG_DATAVERSE_BASE_URL: ${{ vars.STG_DATAVERSE_BASE_URL }}", validate_block)
-        self.assertIn("STG_DATAVERSE_BASE_URL \\", validate_block)
-        self.assertNotIn(removed_staging_secret, validate_block)
+        self.assertIn("AZ_KEY_VAULT_URL", validate_block)
+        self.assertNotIn("STG_", validate_block)
 
         sync_block = workflow.split("      - name: Sync web staging runtime config", maxsplit=1)[1].split(
             "      - name: Build and push web image to ACR",
             maxsplit=1,
         )[0]
-        self.assertIn("STG_DATAVERSE_BASE_URL: ${{ vars.STG_DATAVERSE_BASE_URL }}", sync_block)
-        self.assertIn("STG_POWER_PLATFORM_ENVIRONMENT_ID: ${{ vars.STG_POWER_PLATFORM_ENVIRONMENT_ID }}", sync_block)
-        self.assertIn(
-            "STG_DATAVERSE_AGENT_SECURITY_GROUP_MAPPING_TABLE_URL: ${{ vars.STG_DATAVERSE_AGENT_SECURITY_GROUP_MAPPING_TABLE_URL }}",
-            sync_block,
-        )
-        self.assertNotIn(removed_staging_secret, sync_block)
+        self.assertIn("sync-staging-web-config.sh", sync_block)
+        self.assertNotIn("STG_", sync_block)
 
     def test_package_web_runtime_entrypoint_does_not_export_auth_secret_env(self):
         package_script = (ROOT / "scripts" / "ci" / "package-web-runtime.sh").read_text()
@@ -566,8 +556,71 @@ class DeployClientEnvironmentTests(unittest.TestCase):
 
         self.assertIn('cat > "${runtime_dir}/entrypoint.sh"', package_script)
         self.assertIn('CMD ["./entrypoint.sh"]', package_script)
-        self.assertIn('exec node server.js', package_script)
+        self.assertIn('exec node key-vault-entrypoint.cjs', package_script)
         self.assertNotIn(removed_runtime_secret, package_script)
+
+    def test_sync_key_vault_runtime_config_writes_runtime_values_as_secrets(self):
+        source = {
+            "app_version": "3.3.0",
+            "staging_version_source": ".github/workflows/deploy-staging.yml",
+            "git_branch": "main",
+            "git_commit_sha": "abcdef1234567890",
+            "image_tag": "abcdef123456",
+        }
+        state = deployment_lib.build_default_state("Acme District", source, "sub-123", "eastus", "sharedacr")
+        state["runtime"]["DATABASE_URL"] = "postgresql://example"
+        state["runtime"]["DATAVERSE_BASE_URL"] = "https://org.crm.dynamics.com"
+        state["runtime"]["DATAVERSE_TABLE_URL"] = "https://org.crm.dynamics.com/api/data/v9.2/cr6c3_table11s"
+        state["runtime"]["DATAVERSE_COLUMN_PREFIX"] = "cr6c3"
+        state["runtime"]["ENTRA_TENANT_ID"] = "tenant"
+        state["runtime"]["ENTRA_CLIENT_ID"] = "client"
+        state["runtime"]["ENTRA_CLIENT_SECRET"] = "secret"
+        state["runtime"]["ADMIN_GROUP_ID"] = "admins"
+        state["runtime"]["USER_GROUP_ID"] = "users"
+        state["runtime"]["INTERNAL_EMAIL_DOMAINS"] = "example.com"
+        state["runtime"]["NEXTAUTH_URL"] = "https://web.example.com"
+        state["runtime"]["WORKER_API_URL"] = "https://worker.example.com"
+        state["runtime"]["WORKER_INTERNAL_API_TOKEN"] = "worker-token"
+        state["runtime"]["WORKER_HEARTBEAT_TOKEN"] = "heartbeat-token"
+        state["runtime"]["WORKER_HEARTBEAT_URL"] = "https://web.example.com/api/internal/worker-heartbeat"
+
+        with patch.object(deploy_client_environment, "run_command") as run_command_mock:
+            deploy_client_environment.sync_key_vault_runtime_config(state, dry_run=True, io=MagicMock())
+
+        commands = [call.args[0] for call in run_command_mock.call_args_list]
+        self.assertTrue(
+            any(
+                command[:4] == ["az", "keyvault", "secret", "set"]
+                and "DATABASE-URL" in command
+                and "postgresql://example" in command
+                for command in commands
+            )
+        )
+        self.assertTrue(
+            any(
+                command[:4] == ["az", "keyvault", "secret", "set"]
+                and "ENTRA-CLIENT-SECRET" in command
+                and "secret" in command
+                for command in commands
+            )
+        )
+        self.assertTrue(
+            any(
+                command[:4] == ["az", "keyvault", "secret", "set"]
+                and "DATAVERSE-AGENT-SECURITY-GROUP-MAPPING-TABLE-URL" in command
+                and deploy_client_environment.KEY_VAULT_UNSET_VALUE in command
+                for command in commands
+            )
+        )
+
+    def test_staging_sync_scripts_do_not_ignore_legacy_cleanup_failures(self):
+        web_script = (ROOT / "scripts" / "ci" / "sync-staging-web-config.sh").read_text()
+        worker_script = (ROOT / "scripts" / "ci" / "sync-staging-worker-config.sh").read_text()
+
+        self.assertNotIn("|| true", web_script)
+        self.assertNotIn("|| true", worker_script)
+        self.assertIn("remove_existing_env_vars", web_script)
+        self.assertIn("remove_existing_env_vars", worker_script)
 
     def test_build_summary_markdown_mentions_smoke_checks(self):
         source = {

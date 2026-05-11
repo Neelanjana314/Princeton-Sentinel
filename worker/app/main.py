@@ -1,5 +1,9 @@
 import os
 
+from app.key_vault_env import hydrate_env_from_key_vault
+
+hydrate_env_from_key_vault("worker")
+
 from app.api import create_app
 from app.heartbeat import start_heartbeat_thread
 from app.scheduler import start_scheduler_thread

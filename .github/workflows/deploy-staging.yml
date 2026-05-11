@@ -15,11 +15,12 @@ permissions:
   contents: read
 
 env:
-  STAGING_VERSION: 3.7.2
+  STAGING_VERSION: 3.8.0
   AZ_RESOURCE_GROUP: ${{ vars.AZ_RESOURCE_GROUP }}
   AZ_ACR_NAME: ${{ vars.AZ_ACR_NAME }}
   AZ_WEB_APP_NAME: ${{ vars.AZ_WEB_APP_NAME }}
   AZ_WORKER_APP_NAME: ${{ vars.AZ_WORKER_APP_NAME }}
+  AZ_KEY_VAULT_URL: ${{ vars.AZ_KEY_VAULT_URL }}
 
 jobs:
   prepare:
@@ -75,7 +76,7 @@ jobs:
       - name: Validate shared Azure variables
         if: steps.changes.outputs.any == 'true'
         shell: bash
-        run: scripts/ci/validate-required-env.sh AZ_RESOURCE_GROUP AZ_ACR_NAME AZ_WEB_APP_NAME AZ_WORKER_APP_NAME
+        run: scripts/ci/validate-required-env.sh AZ_RESOURCE_GROUP AZ_ACR_NAME AZ_WEB_APP_NAME AZ_WORKER_APP_NAME AZ_KEY_VAULT_URL
 
   await_db_migration_approval:
     needs: prepare
@@ -160,71 +161,10 @@ jobs:
 
       - name: Validate web staging runtime config
         shell: bash
-        env:
-          STG_DATABASE_URL: ${{ secrets.STG_DATABASE_URL }}
-          STG_ENTRA_CLIENT_SECRET: ${{ secrets.STG_ENTRA_CLIENT_SECRET }}
-          STG_WORKER_INTERNAL_API_TOKEN: ${{ secrets.STG_WORKER_INTERNAL_API_TOKEN }}
-          STG_WORKER_HEARTBEAT_TOKEN: ${{ secrets.STG_WORKER_HEARTBEAT_TOKEN }}
-          STG_ENTRA_TENANT_ID: ${{ vars.STG_ENTRA_TENANT_ID }}
-          STG_ENTRA_CLIENT_ID: ${{ vars.STG_ENTRA_CLIENT_ID }}
-          STG_ADMIN_GROUP_ID: ${{ vars.STG_ADMIN_GROUP_ID }}
-          STG_USER_GROUP_ID: ${{ vars.STG_USER_GROUP_ID }}
-          STG_DATAVERSE_BASE_URL: ${{ vars.STG_DATAVERSE_BASE_URL }}
-          STG_POWER_PLATFORM_ENVIRONMENT_ID: ${{ vars.STG_POWER_PLATFORM_ENVIRONMENT_ID }}
-          STG_DATAVERSE_TABLE_URL: ${{ vars.STG_DATAVERSE_TABLE_URL }}
-          STG_DATAVERSE_COLUMN_PREFIX: ${{ vars.STG_DATAVERSE_COLUMN_PREFIX }}
-          STG_INTERNAL_EMAIL_DOMAINS: ${{ vars.STG_INTERNAL_EMAIL_DOMAINS }}
-          STG_DASHBOARD_DORMANT_LOOKBACK_DAYS: ${{ vars.STG_DASHBOARD_DORMANT_LOOKBACK_DAYS }}
-        run: |
-          scripts/ci/validate-required-env.sh \
-            STG_DATABASE_URL \
-            STG_ENTRA_CLIENT_SECRET \
-            STG_WORKER_INTERNAL_API_TOKEN \
-            STG_WORKER_HEARTBEAT_TOKEN \
-            STG_ENTRA_TENANT_ID \
-            STG_ENTRA_CLIENT_ID \
-            STG_ADMIN_GROUP_ID \
-            STG_USER_GROUP_ID \
-            STG_DATAVERSE_BASE_URL \
-            STG_DATAVERSE_TABLE_URL \
-            STG_DATAVERSE_COLUMN_PREFIX \
-            STG_INTERNAL_EMAIL_DOMAINS \
-            STG_DASHBOARD_DORMANT_LOOKBACK_DAYS
+        run: scripts/ci/validate-required-env.sh AZ_KEY_VAULT_URL
 
       - name: Sync web staging runtime config
         shell: bash
-        env:
-          STG_DATABASE_URL: ${{ secrets.STG_DATABASE_URL }}
-          STG_ENTRA_CLIENT_SECRET: ${{ secrets.STG_ENTRA_CLIENT_SECRET }}
-          STG_WORKER_INTERNAL_API_TOKEN: ${{ secrets.STG_WORKER_INTERNAL_API_TOKEN }}
-          STG_WORKER_HEARTBEAT_TOKEN: ${{ secrets.STG_WORKER_HEARTBEAT_TOKEN }}
-          STG_NEXTAUTH_URL: ${{ vars.STG_NEXTAUTH_URL }}
-          STG_WORKER_API_URL: ${{ vars.STG_WORKER_API_URL }}
-          STG_WORKER_HEARTBEAT_URL: ${{ vars.STG_WORKER_HEARTBEAT_URL }}
-          STG_ENTRA_TENANT_ID: ${{ vars.STG_ENTRA_TENANT_ID }}
-          STG_ENTRA_CLIENT_ID: ${{ vars.STG_ENTRA_CLIENT_ID }}
-          STG_ADMIN_GROUP_ID: ${{ vars.STG_ADMIN_GROUP_ID }}
-          STG_USER_GROUP_ID: ${{ vars.STG_USER_GROUP_ID }}
-          STG_DATAVERSE_BASE_URL: ${{ vars.STG_DATAVERSE_BASE_URL }}
-          STG_POWER_PLATFORM_ENVIRONMENT_ID: ${{ vars.STG_POWER_PLATFORM_ENVIRONMENT_ID }}
-          STG_DATAVERSE_TABLE_URL: ${{ vars.STG_DATAVERSE_TABLE_URL }}
-          STG_DATAVERSE_COLUMN_PREFIX: ${{ vars.STG_DATAVERSE_COLUMN_PREFIX }}
-          STG_DATAVERSE_AGENT_SECURITY_GROUP_MAPPING_TABLE_URL: ${{ vars.STG_DATAVERSE_AGENT_SECURITY_GROUP_MAPPING_TABLE_URL }}
-          STG_INTERNAL_EMAIL_DOMAINS: ${{ vars.STG_INTERNAL_EMAIL_DOMAINS }}
-          STG_DASHBOARD_DORMANT_LOOKBACK_DAYS: ${{ vars.STG_DASHBOARD_DORMANT_LOOKBACK_DAYS }}
-          STG_LICENSE_PUBLIC_KEY_PATH: ${{ vars.STG_LICENSE_PUBLIC_KEY_PATH }}
-          STG_LICENSE_CACHE_TTL_SECONDS: ${{ vars.STG_LICENSE_CACHE_TTL_SECONDS }}
-          STG_DB_CONNECT_TIMEOUT_SECONDS: ${{ vars.STG_DB_CONNECT_TIMEOUT_SECONDS }}
-          STG_SCHEDULER_POLL_SECONDS: ${{ vars.STG_SCHEDULER_POLL_SECONDS }}
-          STG_GRAPH_BASE: ${{ vars.STG_GRAPH_BASE }}
-          STG_GRAPH_MAX_CONCURRENCY: ${{ vars.STG_GRAPH_MAX_CONCURRENCY }}
-          STG_GRAPH_MAX_RETRIES: ${{ vars.STG_GRAPH_MAX_RETRIES }}
-          STG_GRAPH_CONNECT_TIMEOUT: ${{ vars.STG_GRAPH_CONNECT_TIMEOUT }}
-          STG_GRAPH_READ_TIMEOUT: ${{ vars.STG_GRAPH_READ_TIMEOUT }}
-          STG_GRAPH_PAGE_SIZE: ${{ vars.STG_GRAPH_PAGE_SIZE }}
-          STG_GRAPH_PERMISSIONS_BATCH_SIZE: ${{ vars.STG_GRAPH_PERMISSIONS_BATCH_SIZE }}
-          STG_GRAPH_PERMISSIONS_STALE_AFTER_HOURS: ${{ vars.STG_GRAPH_PERMISSIONS_STALE_AFTER_HOURS }}
-          STG_FLUSH_EVERY: ${{ vars.STG_FLUSH_EVERY }}
         run: scripts/ci/sync-staging-web-config.sh
 
       - name: Build and push web image to ACR
@@ -331,85 +271,10 @@ jobs:
 
       - name: Validate worker staging runtime config
         shell: bash
-        env:
-          STG_DATABASE_URL: ${{ secrets.STG_DATABASE_URL }}
-          STG_APPINSIGHTS_API_KEY: ${{ secrets.STG_APPINSIGHTS_API_KEY }}
-          STG_ENTRA_CLIENT_SECRET: ${{ secrets.STG_ENTRA_CLIENT_SECRET }}
-          STG_WORKER_INTERNAL_API_TOKEN: ${{ secrets.STG_WORKER_INTERNAL_API_TOKEN }}
-          STG_WORKER_HEARTBEAT_TOKEN: ${{ secrets.STG_WORKER_HEARTBEAT_TOKEN }}
-          STG_APPINSIGHTS_APP_ID: ${{ vars.STG_APPINSIGHTS_APP_ID }}
-          STG_DATAVERSE_BASE_URL: ${{ vars.STG_DATAVERSE_BASE_URL }}
-          STG_DATAVERSE_TABLE_URL: ${{ vars.STG_DATAVERSE_TABLE_URL }}
-          STG_DATAVERSE_COLUMN_PREFIX: ${{ vars.STG_DATAVERSE_COLUMN_PREFIX }}
-          STG_ENTRA_TENANT_ID: ${{ vars.STG_ENTRA_TENANT_ID }}
-          STG_ENTRA_CLIENT_ID: ${{ vars.STG_ENTRA_CLIENT_ID }}
-          STG_INTERNAL_EMAIL_DOMAINS: ${{ vars.STG_INTERNAL_EMAIL_DOMAINS }}
-          STG_DB_CONNECT_TIMEOUT_SECONDS: ${{ vars.STG_DB_CONNECT_TIMEOUT_SECONDS }}
-          STG_SCHEDULER_POLL_SECONDS: ${{ vars.STG_SCHEDULER_POLL_SECONDS }}
-          STG_GRAPH_BASE: ${{ vars.STG_GRAPH_BASE }}
-          STG_GRAPH_MAX_CONCURRENCY: ${{ vars.STG_GRAPH_MAX_CONCURRENCY }}
-          STG_GRAPH_MAX_RETRIES: ${{ vars.STG_GRAPH_MAX_RETRIES }}
-          STG_GRAPH_CONNECT_TIMEOUT: ${{ vars.STG_GRAPH_CONNECT_TIMEOUT }}
-          STG_GRAPH_READ_TIMEOUT: ${{ vars.STG_GRAPH_READ_TIMEOUT }}
-          STG_GRAPH_PAGE_SIZE: ${{ vars.STG_GRAPH_PAGE_SIZE }}
-          STG_GRAPH_PERMISSIONS_BATCH_SIZE: ${{ vars.STG_GRAPH_PERMISSIONS_BATCH_SIZE }}
-          STG_GRAPH_PERMISSIONS_STALE_AFTER_HOURS: ${{ vars.STG_GRAPH_PERMISSIONS_STALE_AFTER_HOURS }}
-          STG_FLUSH_EVERY: ${{ vars.STG_FLUSH_EVERY }}
-        run: |
-          scripts/ci/validate-required-env.sh \
-            STG_DATABASE_URL \
-            STG_APPINSIGHTS_API_KEY \
-            STG_ENTRA_CLIENT_SECRET \
-            STG_WORKER_INTERNAL_API_TOKEN \
-            STG_WORKER_HEARTBEAT_TOKEN \
-            STG_APPINSIGHTS_APP_ID \
-            STG_DATAVERSE_BASE_URL \
-            STG_DATAVERSE_TABLE_URL \
-            STG_DATAVERSE_COLUMN_PREFIX \
-            STG_ENTRA_TENANT_ID \
-            STG_ENTRA_CLIENT_ID \
-            STG_INTERNAL_EMAIL_DOMAINS \
-            STG_DB_CONNECT_TIMEOUT_SECONDS \
-            STG_SCHEDULER_POLL_SECONDS \
-            STG_GRAPH_BASE \
-            STG_GRAPH_MAX_CONCURRENCY \
-            STG_GRAPH_MAX_RETRIES \
-            STG_GRAPH_CONNECT_TIMEOUT \
-            STG_GRAPH_READ_TIMEOUT \
-            STG_GRAPH_PAGE_SIZE \
-            STG_GRAPH_PERMISSIONS_BATCH_SIZE \
-            STG_GRAPH_PERMISSIONS_STALE_AFTER_HOURS \
-            STG_FLUSH_EVERY
+        run: scripts/ci/validate-required-env.sh AZ_KEY_VAULT_URL
 
       - name: Sync worker staging runtime config
         shell: bash
-        env:
-          STG_DATABASE_URL: ${{ secrets.STG_DATABASE_URL }}
-          STG_APPINSIGHTS_API_KEY: ${{ secrets.STG_APPINSIGHTS_API_KEY }}
-          STG_ENTRA_CLIENT_SECRET: ${{ secrets.STG_ENTRA_CLIENT_SECRET }}
-          STG_WORKER_INTERNAL_API_TOKEN: ${{ secrets.STG_WORKER_INTERNAL_API_TOKEN }}
-          STG_WORKER_HEARTBEAT_TOKEN: ${{ secrets.STG_WORKER_HEARTBEAT_TOKEN }}
-          STG_WORKER_HEARTBEAT_URL: ${{ vars.STG_WORKER_HEARTBEAT_URL }}
-          STG_APPINSIGHTS_APP_ID: ${{ vars.STG_APPINSIGHTS_APP_ID }}
-          STG_DATAVERSE_BASE_URL: ${{ vars.STG_DATAVERSE_BASE_URL }}
-          STG_DATAVERSE_TABLE_URL: ${{ vars.STG_DATAVERSE_TABLE_URL }}
-          STG_DATAVERSE_COLUMN_PREFIX: ${{ vars.STG_DATAVERSE_COLUMN_PREFIX }}
-          STG_ENTRA_TENANT_ID: ${{ vars.STG_ENTRA_TENANT_ID }}
-          STG_ENTRA_CLIENT_ID: ${{ vars.STG_ENTRA_CLIENT_ID }}
-          STG_INTERNAL_EMAIL_DOMAINS: ${{ vars.STG_INTERNAL_EMAIL_DOMAINS }}
-          STG_LICENSE_PUBLIC_KEY_PATH: ${{ vars.STG_LICENSE_PUBLIC_KEY_PATH }}
-          STG_LICENSE_CACHE_TTL_SECONDS: ${{ vars.STG_LICENSE_CACHE_TTL_SECONDS }}
-          STG_DB_CONNECT_TIMEOUT_SECONDS: ${{ vars.STG_DB_CONNECT_TIMEOUT_SECONDS }}
-          STG_SCHEDULER_POLL_SECONDS: ${{ vars.STG_SCHEDULER_POLL_SECONDS }}
-          STG_GRAPH_BASE: ${{ vars.STG_GRAPH_BASE }}
-          STG_GRAPH_MAX_CONCURRENCY: ${{ vars.STG_GRAPH_MAX_CONCURRENCY }}
-          STG_GRAPH_MAX_RETRIES: ${{ vars.STG_GRAPH_MAX_RETRIES }}
-          STG_GRAPH_CONNECT_TIMEOUT: ${{ vars.STG_GRAPH_CONNECT_TIMEOUT }}
-          STG_GRAPH_READ_TIMEOUT: ${{ vars.STG_GRAPH_READ_TIMEOUT }}
-          STG_GRAPH_PAGE_SIZE: ${{ vars.STG_GRAPH_PAGE_SIZE }}
-          STG_GRAPH_PERMISSIONS_BATCH_SIZE: ${{ vars.STG_GRAPH_PERMISSIONS_BATCH_SIZE }}
-          STG_GRAPH_PERMISSIONS_STALE_AFTER_HOURS: ${{ vars.STG_GRAPH_PERMISSIONS_STALE_AFTER_HOURS }}
-          STG_FLUSH_EVERY: ${{ vars.STG_FLUSH_EVERY }}
         run: scripts/ci/sync-staging-worker-config.sh
 
       - name: Build and push worker image to ACR

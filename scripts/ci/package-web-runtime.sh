@@ -8,6 +8,8 @@ repo_root="$(cd "${script_dir}/../.." && pwd)"
 standalone_dir="${repo_root}/web/.next/standalone"
 static_dir="${repo_root}/web/.next/static"
 public_dir="${repo_root}/web/public"
+key_vault_runtime_dir="${repo_root}/web/runtime"
+manifest_file="${repo_root}/runtime-env-manifest.json"
 runtime_dir="${repo_root}/.dist/web-runtime"
 required_public_assets=(
   "pis-logo.png"
@@ -29,6 +31,16 @@ if [[ ! -d "${public_dir}" ]]; then
   exit 1
 fi
 
+if [[ ! -f "${key_vault_runtime_dir}/key-vault-env.cjs" || ! -f "${key_vault_runtime_dir}/key-vault-entrypoint.cjs" ]]; then
+  echo "Missing web Key Vault runtime bootstrap files under ${key_vault_runtime_dir}" >&2
+  exit 1
+fi
+
+if [[ ! -f "${manifest_file}" ]]; then
+  echo "Missing runtime env manifest at ${manifest_file}" >&2
+  exit 1
+fi
+
 for asset in "${required_public_assets[@]}"; do
   if [[ ! -f "${public_dir}/${asset}" ]]; then
     echo "Missing required web public asset at ${public_dir}/${asset}" >&2
@@ -41,6 +53,9 @@ mkdir -p "${runtime_dir}/.next"
 
 cp -R "${standalone_dir}/." "${runtime_dir}/"
 cp -R "${static_dir}" "${runtime_dir}/.next/static"
+cp "${key_vault_runtime_dir}/key-vault-env.cjs" "${runtime_dir}/key-vault-env.cjs"
+cp "${key_vault_runtime_dir}/key-vault-entrypoint.cjs" "${runtime_dir}/key-vault-entrypoint.cjs"
+cp "${manifest_file}" "${runtime_dir}/runtime-env-manifest.json"
 
 if [[ -d "${public_dir}" ]]; then
   cp -R "${public_dir}" "${runtime_dir}/public"
@@ -66,7 +81,7 @@ cat > "${runtime_dir}/entrypoint.sh" <<'EOF'
 
 set -eu
 
-exec node server.js
+exec node key-vault-entrypoint.cjs
 EOF
 
 chmod +x "${runtime_dir}/entrypoint.sh"
@@ -83,6 +98,16 @@ fi
 
 if [[ ! -d "${runtime_dir}/public" ]]; then
   echo "Packaged web runtime is missing public assets" >&2
+  exit 1
+fi
+
+if [[ ! -f "${runtime_dir}/key-vault-env.cjs" || ! -f "${runtime_dir}/key-vault-entrypoint.cjs" ]]; then
+  echo "Packaged web runtime is missing Key Vault bootstrap files" >&2
+  exit 1
+fi
+
+if [[ ! -f "${runtime_dir}/runtime-env-manifest.json" ]]; then
+  echo "Packaged web runtime is missing runtime env manifest" >&2
   exit 1
 fi
 

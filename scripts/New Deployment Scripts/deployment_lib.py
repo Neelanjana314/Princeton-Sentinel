@@ -34,6 +34,7 @@ STATE_FILE_NAME = "state.json"
 ENV_SNAPSHOT_FILE_NAME = "env-snapshot.json"
 SUMMARY_FILE_NAME = "deployment-summary.md"
 STAGING_WORKFLOW_PATH = ROOT / ".github" / "workflows" / "deploy-staging.yml"
+RUNTIME_ENV_MANIFEST_PATH = ROOT / "runtime-env-manifest.json"
 DEFAULT_LICENSE_PUBLIC_KEY_MOUNT_PATH = "/mnt/secrets/licensepublickey"
 PLACEHOLDER_IMAGE = "docker.io/library/nginx:1.27-alpine"
 DEFAULT_GRAPH_INGEST_CRON = "0 */6 * * *"
@@ -63,6 +64,8 @@ MASTER_CSV_FIELDS = [
     "acr_login_server",
     "acr_username",
     "acr_password",
+    "key_vault_name",
+    "key_vault_url",
     "app_insights_name",
     "app_insights_app_id",
     "app_insights_api_key",
@@ -481,6 +484,8 @@ def build_default_state(
             "acr_login_server": acr_login_server,
             "acr_username": acr_username,
             "acr_password": acr_password,
+            "key_vault_name": normalize_resource_name(f"kv-{client_slug}", max_length=24),
+            "key_vault_url": "",
             "resource_group": resolved_resource_group,
             "log_analytics_workspace": f"law-{name_stem}",
             "containerapp_environment": f"cae-{name_stem}",
@@ -606,6 +611,7 @@ def build_runtime_env_snapshot(state: dict[str, Any]) -> dict[str, str]:
         "AZ_ACR_LOGIN_SERVER": str(azure.get("acr_login_server") or ""),
         "AZ_WEB_APP_NAME": str(azure.get("web_app_name") or ""),
         "AZ_WORKER_APP_NAME": str(azure.get("worker_app_name") or ""),
+        "AZ_KEY_VAULT_URL": str(azure.get("key_vault_url") or ""),
     }
     return snapshot
 
@@ -646,6 +652,8 @@ def build_summary_markdown(state: dict[str, Any]) -> str:
         f"- ACR SKU: `{sanitize_markdown(azure.get('acr_sku'))}`",
         f"- ACR name: `{sanitize_markdown(azure.get('acr_name'))}`",
         f"- ACR login server: `{sanitize_markdown(azure.get('acr_login_server'))}`",
+        f"- Key Vault: `{sanitize_markdown(azure.get('key_vault_name'))}`",
+        f"- Key Vault URL: `{sanitize_markdown(azure.get('key_vault_url'))}`",
         f"- Web app: `{sanitize_markdown(azure.get('web_app_name'))}`",
         f"- Web FQDN: `{sanitize_markdown(azure.get('web_fqdn'))}`",
         f"- Worker app: `{sanitize_markdown(azure.get('worker_app_name'))}`",
@@ -729,6 +737,8 @@ def csv_row_from_state(state: dict[str, Any]) -> dict[str, str]:
         "acr_login_server": str(azure.get("acr_login_server") or ""),
         "acr_username": str(azure.get("acr_username") or ""),
         "acr_password": str(azure.get("acr_password") or ""),
+        "key_vault_name": str(azure.get("key_vault_name") or ""),
+        "key_vault_url": str(azure.get("key_vault_url") or ""),
         "app_insights_name": str(azure.get("app_insights_name") or ""),
         "app_insights_app_id": str(runtime.get("APPINSIGHTS_APP_ID") or azure.get("app_insights_app_id") or ""),
         "app_insights_api_key": str(runtime.get("APPINSIGHTS_API_KEY") or azure.get("app_insights_api_key") or ""),

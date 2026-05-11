@@ -15,6 +15,7 @@ fi
 runtime_dir="${repo_root}/.dist/worker-runtime"
 app_dir="${runtime_dir}/app"
 requirements_file="${runtime_dir}/requirements.txt"
+manifest_file="${repo_root}/runtime-env-manifest.json"
 validation_dir="$(mktemp -d)"
 validation_vendor_dir="${validation_dir}/python"
 
@@ -29,6 +30,7 @@ mkdir -p "${app_dir}" "${validation_vendor_dir}"
 cp "${repo_root}/worker/requirements.txt" "${requirements_file}"
 "${python_bin}" -m pip install --no-compile --target "${validation_vendor_dir}" -r "${repo_root}/worker/requirements.txt"
 cp -R "${repo_root}/worker/app/." "${app_dir}/"
+cp "${manifest_file}" "${app_dir}/runtime-env-manifest.json"
 
 "${python_bin}" -m compileall -b "${app_dir}"
 find "${app_dir}" -type f -name '*.py' -delete
@@ -59,6 +61,16 @@ fi
 
 if [[ ! -f "${app_dir}/main.pyc" ]]; then
   echo "Packaged worker runtime is missing app/main.pyc" >&2
+  exit 1
+fi
+
+if [[ ! -f "${app_dir}/key_vault_env.pyc" ]]; then
+  echo "Packaged worker runtime is missing app/key_vault_env.pyc" >&2
+  exit 1
+fi
+
+if [[ ! -f "${app_dir}/runtime-env-manifest.json" ]]; then
+  echo "Packaged worker runtime is missing app/runtime-env-manifest.json" >&2
   exit 1
 fi
 
