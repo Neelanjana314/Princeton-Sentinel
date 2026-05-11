@@ -24,8 +24,8 @@ const {
 } = require("../app/lib/auth-cookies") as typeof import("../app/lib/auth-cookies");
 const { buildPostAuthBridgeUrl, POST_AUTH_BRIDGE_PATH } = require("../app/lib/callback-url") as typeof import("../app/lib/callback-url");
 
-test("getAuthOptions configures Azure AD with PKCE", async () => {
-  const options = await getAuthOptions();
+test("getAuthOptions configures Azure AD with PKCE", () => {
+  const options = getAuthOptions();
   const provider = options.providers?.[0];
 
   assert.equal(provider?.id, "azure-ad");
@@ -37,13 +37,13 @@ test("getAuthOptions configures Azure AD with PKCE", async () => {
   assert.doesNotMatch((provider as any)?.options?.authorization?.params?.scope, /CopilotStudio\.AdminActions\.Invoke/);
 });
 
-test("getAuthOptions uses the boot-scoped auth secret", async () => {
+test("getAuthOptions uses the boot-scoped auth secret", () => {
   resetBootScopedAuthSecretForTests();
 
   try {
     setBootScopedAuthSecretForTests("test-auth-secret");
 
-    const options = await getAuthOptions();
+    const options = getAuthOptions();
 
     assert.equal(options.secret, "test-auth-secret");
     assert.equal(getBootScopedAuthSecret(), "test-auth-secret");
@@ -53,7 +53,7 @@ test("getAuthOptions uses the boot-scoped auth secret", async () => {
 });
 
 test("getAuthOptions redeems Azure auth codes with baseline OIDC scopes", async () => {
-  const options = await getAuthOptions();
+  const options = getAuthOptions();
   const provider = options.providers?.[0] as any;
   const request = provider?.options?.token?.request;
 
@@ -95,10 +95,10 @@ test("getAuthOptions redeems Azure auth codes with baseline OIDC scopes", async 
   assert.equal(result.tokens.access_token, "provider-access-token");
 });
 
-test("getAuthOptions hardens auth cookies without breaking OAuth callbacks", async () => {
+test("getAuthOptions hardens auth cookies without breaking OAuth callbacks", () => {
   testEnv.NEXTAUTH_URL = "https://sentinel.example.com";
 
-  const options = await getAuthOptions();
+  const options = getAuthOptions();
   const cookies = options.cookies;
 
   assert.ok(cookies);
@@ -131,7 +131,7 @@ test("auth cookie policy stays compatible with local http localhost", () => {
 });
 
 test("post-auth redirect callback routes successful sign-ins through the bridge page", async () => {
-  const options = await getAuthOptions();
+  const options = getAuthOptions();
   const redirect = options.callbacks?.redirect;
 
   assert.ok(redirect);
@@ -157,7 +157,7 @@ test("post-auth bridge bypasses sign-in and sign-out destinations", () => {
 
 test("jwt callback derives claims without persisting provider tokens", async () => {
   resetDelegatedAuthStateForTests();
-  const options = await getAuthOptions();
+  const options = getAuthOptions();
   const jwt = options.callbacks?.jwt;
   assert.ok(jwt);
 
@@ -203,7 +203,7 @@ test("jwt callback derives claims without persisting provider tokens", async () 
 });
 
 test("session callback does not expose provider access tokens", async () => {
-  const options = await getAuthOptions();
+  const options = getAuthOptions();
   const sessionCallback = options.callbacks?.session;
   assert.ok(sessionCallback);
 
@@ -236,7 +236,7 @@ test("session callback does not expose provider access tokens", async () => {
 
 test("signOut event clears delegated auth state", async () => {
   resetDelegatedAuthStateForTests();
-  const options = await getAuthOptions();
+  const options = getAuthOptions();
   const signOut = options.events?.signOut;
 
   assert.ok(signOut);

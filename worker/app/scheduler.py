@@ -1,3 +1,4 @@
+import os
 import json
 import threading
 import time
@@ -11,9 +12,18 @@ from app.jobs.mv_refresh import run_mv_refresh
 from app.jobs.copilot_telemetry import run_copilot_telemetry
 from app.jobs.copilot_usage_sync import run_copilot_usage_sync
 from app.license import LicenseFeatureError, get_job_type_license_feature, require_license_feature
-from app.runtime_config import get_bool_runtime_env, get_int_runtime_env
 from app.runtime_logger import emit
 from app.utils import log_audit_event, log_job_run_log
+
+SCHEDULER_POLL_SECONDS = int(os.getenv("SCHEDULER_POLL_SECONDS", "30"))
+RECOVER_INTERRUPTED_RUNS_ON_STARTUP = os.getenv("RECOVER_INTERRUPTED_RUNS_ON_STARTUP", "true").strip().lower() in {
+    "1",
+    "true",
+    "t",
+    "yes",
+    "y",
+    "on",
+}
 
 _scheduler_status = {
     "running": False,
@@ -36,7 +46,7 @@ def start_scheduler_thread():
 
 def _scheduler_loop():
     _scheduler_status["running"] = True
-    if get_bool_runtime_env("RECOVER_INTERRUPTED_RUNS_ON_STARTUP", True):
+    if RECOVER_INTERRUPTED_RUNS_ON_STARTUP:
         try:
             recovered = _recover_interrupted_runs()
             if recovered:
@@ -51,7 +61,7 @@ def _scheduler_loop():
         except Exception as exc:
             _scheduler_status["last_error"] = str(exc)
             emit("ERROR", "SCHEDULER", f"Scheduler loop failure: error={exc}")
-        time.sleep(max(1, get_int_runtime_env("SCHEDULER_POLL_SECONDS", 30)))
+        time.sleep(SCHEDULER_POLL_SECONDS)
 
 
 def _run_due_schedule():

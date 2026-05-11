@@ -169,7 +169,7 @@ async function DriveDetailPage({
     [driveId]
   );
 
-  const patterns = await getInternalDomainPatterns();
+  const patterns = getInternalDomainPatterns();
   const sharingRisk = await query<any>(
     `
     WITH distinct_emails AS (

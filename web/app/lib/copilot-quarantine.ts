@@ -1,12 +1,14 @@
 import { fetchWithTimeout, HttpTimeoutError, getPositiveIntEnv } from "@/app/lib/http";
 import { fetchDataverseTable } from "@/app/lib/dataverse";
 import { getDelegatedAuthState, saveDelegatedAuthState } from "@/app/lib/delegated-auth-store";
-import { getPositiveIntRuntimeEnv, getRuntimeEnv, requireRuntimeEnv } from "@/app/lib/runtime-env";
 import type { Session } from "next-auth";
 
 const GRAPH_SCOPE = "https://graph.microsoft.com/Directory.Read.All";
 const POWER_PLATFORM_SCOPE = "https://api.powerplatform.com/CopilotStudio.AdminActions.Invoke";
 const POWER_PLATFORM_API_SCOPE = POWER_PLATFORM_SCOPE;
+const GRAPH_TOKEN_TIMEOUT_MS = getPositiveIntEnv("GRAPH_FETCH_TIMEOUT_MS", 15000);
+const POWER_PLATFORM_TIMEOUT_MS = getPositiveIntEnv("POWER_PLATFORM_FETCH_TIMEOUT_MS", 20000);
+const ROLE_CACHE_TTL_MS = getPositiveIntEnv("COPILOT_ROLE_CACHE_TTL_SECONDS", 900) * 1000;
 const ENVIRONMENT_CACHE_TTL_MS = 15 * 60 * 1000;
 
 const ALLOWED_ROLE_DISPLAY_NAMES = new Set([
@@ -72,30 +74,30 @@ let roleCache = new Map<string, CachedRoleCheck>();
 let environmentCache = new Map<string, CachedEnvironment>();
 let delegatedTokenCache = new Map<string, CachedDelegatedToken>();
 
-async function getEntraConfig() {
-  const tenantId = (await requireRuntimeEnv("ENTRA_TENANT_ID")).trim();
-  const clientId = (await requireRuntimeEnv("ENTRA_CLIENT_ID")).trim();
-  const clientSecret = (await requireRuntimeEnv("ENTRA_CLIENT_SECRET")).trim();
+function getEntraConfig() {
+  const tenantId = process.env.ENTRA_TENANT_ID?.trim() || "";
+  const clientId = process.env.ENTRA_CLIENT_ID?.trim() || "";
+  const clientSecret = process.env.ENTRA_CLIENT_SECRET?.trim() || "";
   if (!tenantId || !clientId || !clientSecret) {
     throw new Error("ENTRA_TENANT_ID/ENTRA_CLIENT_ID/ENTRA_CLIENT_SECRET must be set");
   }
   return { tenantId, clientId, clientSecret };
 }
 
-async function getDataverseBaseUrl() {
-  const baseUrl = (await requireRuntimeEnv("DATAVERSE_BASE_URL")).trim().replace(/\/+$/, "");
+function getDataverseBaseUrl() {
+  const baseUrl = process.env.DATAVERSE_BASE_URL?.trim().replace(/\/+$/, "") || "";
   if (!baseUrl) {
     throw new Error("DATAVERSE_BASE_URL must be set");
   }
   return baseUrl;
 }
 
-async function getConfiguredPowerPlatformEnvironmentId() {
-  return ((await getRuntimeEnv("POWER_PLATFORM_ENVIRONMENT_ID")) || "").trim();
+function getConfiguredPowerPlatformEnvironmentId() {
+  return process.env.POWER_PLATFORM_ENVIRONMENT_ID?.trim() || "";
 }
 
-async function getMappingTableUrl() {
-  const tableUrl = ((await getRuntimeEnv("DATAVERSE_AGENT_SECURITY_GROUP_MAPPING_TABLE_URL")) || "").trim();
+function getMappingTableUrl() {
+  const tableUrl = process.env.DATAVERSE_AGENT_SECURITY_GROUP_MAPPING_TABLE_URL?.trim() || "";
   if (!tableUrl) {
     throw new Error("DATAVERSE_AGENT_SECURITY_GROUP_MAPPING_TABLE_URL must be set");
   }
@@ -224,11 +226,7 @@ function writeDelegatedTokenCache(
 }
 
 async function refreshAccessToken(refreshToken: string, scopes: string[]): Promise<PowerPlatformTokenResult> {
-  const { tenantId, clientId, clientSecret } = await getEntraConfig();
-  const timeoutMs = await getPositiveIntRuntimeEnv(
-    "POWER_PLATFORM_FETCH_TIMEOUT_MS",
-    getPositiveIntEnv("POWER_PLATFORM_FETCH_TIMEOUT_MS", 20000)
-  );
+  const { tenantId, clientId, clientSecret } = getEntraConfig();
   const body = new URLSearchParams({
     grant_type: "refresh_token",
     client_id: clientId,
@@ -248,7 +246,7 @@ async function refreshAccessToken(refreshToken: string, scopes: string[]): Promi
         body: body.toString(),
         cache: "no-store",
       },
-      timeoutMs
+      POWER_PLATFORM_TIMEOUT_MS
     );
   } catch (error) {
     if (error instanceof HttpTimeoutError) {
@@ -332,7 +330,6 @@ async function getDelegatedAccessToken(session: Session | any, scopes: string[])
 }
 
 async function graphGet(accessToken: string, path: string) {
-  const timeoutMs = await getPositiveIntRuntimeEnv("GRAPH_FETCH_TIMEOUT_MS", getPositiveIntEnv("GRAPH_FETCH_TIMEOUT_MS", 15000));
   let response: Response;
   try {
     response = await fetchWithTimeout(
@@ -344,7 +341,7 @@ async function graphGet(accessToken: string, path: string) {
         },
         cache: "no-store",
       },
-      timeoutMs
+      GRAPH_TOKEN_TIMEOUT_MS
     );
   } catch (error) {
     if (error instanceof HttpTimeoutError) {
@@ -365,10 +362,6 @@ async function powerPlatformRequest(
   method: "GET" | "POST",
   path: string,
 ) {
-  const timeoutMs = await getPositiveIntRuntimeEnv(
-    "POWER_PLATFORM_FETCH_TIMEOUT_MS",
-    getPositiveIntEnv("POWER_PLATFORM_FETCH_TIMEOUT_MS", 20000)
-  );
   let response: Response;
   try {
     response = await fetchWithTimeout(
@@ -381,7 +374,7 @@ async function powerPlatformRequest(
         },
         cache: "no-store",
       },
-      timeoutMs
+      POWER_PLATFORM_TIMEOUT_MS
     );
   } catch (error) {
     if (error instanceof HttpTimeoutError) {
@@ -425,15 +418,11 @@ function getAuthStateUpdatedAt(session: Session | any) {
   return typeof state?.updatedAt === "number" ? state.updatedAt : null;
 }
 
-async function readRoleCache(session: Session | any): Promise<RoleCheckResult | null> {
+function readRoleCache(session: Session | any): RoleCheckResult | null {
   const cacheKey = buildRoleCacheKey(session);
   const cached = roleCache.get(cacheKey);
   if (!cached) return null;
-  const ttlMs = (await getPositiveIntRuntimeEnv(
-    "COPILOT_ROLE_CACHE_TTL_SECONDS",
-    getPositiveIntEnv("COPILOT_ROLE_CACHE_TTL_SECONDS", 900)
-  )) * 1000;
-  if (Date.now() - cached.cachedAtMs > ttlMs) {
+  if (Date.now() - cached.cachedAtMs > ROLE_CACHE_TTL_MS) {
     roleCache.delete(cacheKey);
     return null;
   }
@@ -459,7 +448,7 @@ function writeRoleCache(session: Session | any, result: RoleCheckResult) {
 }
 
 export async function evaluateCopilotQuarantineRoles(session: Session | any): Promise<RoleCheckResult> {
-  const cached = await readRoleCache(session);
+  const cached = readRoleCache(session);
   if (cached) {
     return cached;
   }
@@ -535,7 +524,7 @@ function findStringValue(row: Record<string, any>, preferredKeys: string[]) {
 }
 
 async function fetchMappingRows() {
-  const tableUrl = await getMappingTableUrl();
+  const tableUrl = getMappingTableUrl();
   const entitySet = getEntitySetFromUrl(tableUrl);
   const rows = await fetchDataverseTable(entitySet);
   const seen = new Set<string>();
@@ -556,12 +545,12 @@ async function fetchMappingRows() {
 }
 
 async function resolveEnvironmentId(accessToken: string) {
-  const configuredEnvironmentId = await getConfiguredPowerPlatformEnvironmentId();
+  const configuredEnvironmentId = getConfiguredPowerPlatformEnvironmentId();
   if (configuredEnvironmentId) {
     return configuredEnvironmentId;
   }
 
-  const dataverseBaseUrl = normalizeDataverseUrl(await getDataverseBaseUrl());
+  const dataverseBaseUrl = normalizeDataverseUrl(getDataverseBaseUrl());
   const cached = environmentCache.get(dataverseBaseUrl);
   if (cached && Date.now() - cached.cachedAtMs <= ENVIRONMENT_CACHE_TTL_MS) {
     return cached.environmentId;

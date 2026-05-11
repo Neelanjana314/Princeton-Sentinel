@@ -69,7 +69,7 @@ async function SharingPage({ searchParams }: { searchParams?: Promise<SearchPara
   await requireUser();
 
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
-  const internalDomainPatterns = await getInternalDomainPatterns();
+  const internalDomainPatterns = getInternalDomainPatterns();
 
   const search = getParam(resolvedSearchParams, "q");
   const { page, pageSize, offset } = getPagination(resolvedSearchParams, { page: 1, pageSize: 50 });

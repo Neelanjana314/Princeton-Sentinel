@@ -8,14 +8,13 @@ import {
 } from "@/app/lib/dataverse";
 import { withApiRequestTiming } from "@/app/lib/request-timing";
 import { getDvColumns, getDvEntitySet } from "@/app/lib/dv-columns";
-import { getRuntimeEnv } from "@/app/lib/runtime-env";
 
 export const dynamic = "force-dynamic";
 
-async function getDvConfig() {
-  const prefix = (await getRuntimeEnv("DATAVERSE_COLUMN_PREFIX")) || "";
+function getDvConfig() {
+  const prefix = process.env.DATAVERSE_COLUMN_PREFIX || "";
   const cols = getDvColumns(prefix);
-  const entitySet = getDvEntitySet((await getRuntimeEnv("DATAVERSE_TABLE_URL")) || "");
+  const entitySet = getDvEntitySet(process.env.DATAVERSE_TABLE_URL || "");
   const selectCols = [
     cols.id, cols.agentname, cols.username, cols.disableflag,
     cols.reason, cols.lastseeninsync, cols.lastmodifiedby,
@@ -39,11 +38,11 @@ function isUserDeleteFlagAllowed(value: unknown): boolean {
  */
 async function getHandler(req: NextRequest) {
   const { groups } = await requireUser();
-  if (!(await isAdmin(groups))) {
+  if (!isAdmin(groups)) {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
 
-  const { entitySet, cols, selectCols } = await getDvConfig();
+  const { entitySet, cols, selectCols } = getDvConfig();
 
   try {
     const data = await fetchDataverseTable(entitySet, { select: selectCols });
@@ -65,7 +64,7 @@ async function getHandler(req: NextRequest) {
  */
 async function postHandler(req: NextRequest) {
   const { groups } = await requireUser();
-  if (!(await isAdmin(groups))) {
+  if (!isAdmin(groups)) {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
 
@@ -88,7 +87,7 @@ async function postHandler(req: NextRequest) {
   if (!data || typeof data !== "object") return NextResponse.json({ error: "data is required" }, { status: 400 });
 
   try {
-    await patchDataverseRow((await getDvConfig()).entitySet, row_id, data);
+    await patchDataverseRow(getDvConfig().entitySet, row_id, data);
     return NextResponse.json({ status: "updated" });
   } catch (err: unknown) {
     const response = getDataverseErrorResponse(err, "dataverse_patch_failed");

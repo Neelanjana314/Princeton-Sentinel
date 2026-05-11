@@ -2,7 +2,6 @@ import { Client } from "pg";
 
 import { getFeatureFlagsPayload } from "@/app/lib/feature-flags";
 import type { FeatureFlagsPayload } from "@/app/lib/feature-flags-config";
-import { requireRuntimeEnv } from "@/app/lib/runtime-env";
 
 const FEATURE_STATE_CHANNEL = "ps_feature_state_changed";
 const INITIAL_RECONNECT_DELAY_MS = 1_000;
@@ -19,7 +18,6 @@ type BroadcasterState = {
   subscribers: Set<FeatureFlagsSubscriber>;
   broadcastPromise: Promise<void> | null;
   broadcastQueued: boolean;
-  connectionString: string | null;
 };
 
 declare global {
@@ -43,7 +41,6 @@ function getBroadcasterState(): BroadcasterState {
       subscribers: new Set<FeatureFlagsSubscriber>(),
       broadcastPromise: null,
       broadcastQueued: false,
-      connectionString: null,
     };
   }
 
@@ -110,13 +107,15 @@ async function broadcastLatestPayload(state: BroadcasterState) {
 }
 
 async function connectListener(state: BroadcasterState) {
-  const connectionString = await requireRuntimeEnv("DATABASE_URL");
+  const connectionString = process.env.DATABASE_URL;
+  if (!connectionString) {
+    throw new Error("DATABASE_URL is not set");
+  }
 
   await disconnectListener(state);
 
   const client = new Client({ connectionString });
   state.client = client;
-  state.connectionString = connectionString;
 
   client.on("notification", (message) => {
     if (message.channel !== FEATURE_STATE_CHANNEL) {

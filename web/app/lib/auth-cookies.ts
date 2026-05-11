@@ -20,15 +20,6 @@ type AuthCookiePolicies = {
   nonce: CookiePolicy;
 };
 
-async function getRuntimeNextAuthUrl() {
-  try {
-    const { getRuntimeEnv } = await import("./runtime-env");
-    return (await getRuntimeEnv("NEXTAUTH_URL")) ?? process.env.AUTH_URL;
-  } catch {
-    return process.env.NEXTAUTH_URL ?? process.env.AUTH_URL;
-  }
-}
-
 function getAuthCookiePrefix(secure: boolean) {
   return secure ? "__Host-" : "";
 }
@@ -58,38 +49,12 @@ export function shouldUseSecureAuthCookies() {
   return Boolean(process.env.VERCEL);
 }
 
-export async function shouldUseSecureAuthCookiesAsync() {
-  const authUrl = await getRuntimeNextAuthUrl();
-  if (authUrl) {
-    try {
-      return new URL(authUrl).protocol === "https:";
-    } catch {
-      return authUrl.startsWith("https://");
-    }
-  }
-  return Boolean(process.env.VERCEL);
-}
-
 export function getSessionCookieName() {
   return `${getAuthCookiePrefix(shouldUseSecureAuthCookies())}next-auth.session-token`;
 }
 
 export function getAuthCookiePolicies(): AuthCookiePolicies {
   const secure = shouldUseSecureAuthCookies();
-  const prefix = getAuthCookiePrefix(secure);
-
-  return {
-    sessionToken: buildCookiePolicy(`${prefix}next-auth.session-token`, secure, "strict"),
-    callbackUrl: buildCookiePolicy(`${prefix}next-auth.callback-url`, secure, "lax"),
-    csrfToken: buildCookiePolicy(`${prefix}next-auth.csrf-token`, secure, "strict"),
-    pkceCodeVerifier: buildCookiePolicy(`${prefix}next-auth.pkce.code_verifier`, secure, "lax", 60 * 15),
-    state: buildCookiePolicy(`${prefix}next-auth.state`, secure, "lax", 60 * 15),
-    nonce: buildCookiePolicy(`${prefix}next-auth.nonce`, secure, "lax"),
-  };
-}
-
-export async function getAuthCookiePoliciesAsync(): Promise<AuthCookiePolicies> {
-  const secure = await shouldUseSecureAuthCookiesAsync();
   const prefix = getAuthCookiePrefix(secure);
 
   return {

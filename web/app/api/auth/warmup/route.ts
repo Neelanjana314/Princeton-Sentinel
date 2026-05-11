@@ -13,7 +13,7 @@ const getHandler = async function GET() {
     return NextResponse.json({ warmed: false, reason: "no_session" }, { status: 200 });
   }
 
-  if (!(await isAdmin(groups))) {
+  if (!isAdmin(groups)) {
     return NextResponse.json({ warmed: false, reason: "not_admin" }, { status: 200 });
   }
 

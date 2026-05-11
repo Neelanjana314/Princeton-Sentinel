@@ -1,34 +1,35 @@
 import { ConfidentialClientApplication } from "@azure/msal-node";
 import { fetchWithTimeout, getPositiveIntEnv, HttpTimeoutError } from "@/app/lib/http";
-import { getPositiveIntRuntimeEnv, requireRuntimeEnv } from "@/app/lib/runtime-env";
 
 const graphBase = "https://graph.microsoft.com/v1.0";
-let cachedCca: { cacheKey: string; client: ConfidentialClientApplication } | null = null;
+let cachedCca: ConfidentialClientApplication | null = null;
+const GRAPH_FETCH_TIMEOUT_MS = getPositiveIntEnv("GRAPH_FETCH_TIMEOUT_MS", 15000);
 
-async function getGraphEnv() {
-  const tenantId = await requireRuntimeEnv("ENTRA_TENANT_ID");
-  const clientId = await requireRuntimeEnv("ENTRA_CLIENT_ID");
-  const clientSecret = await requireRuntimeEnv("ENTRA_CLIENT_SECRET");
+function getGraphEnv() {
+  const tenantId = process.env.ENTRA_TENANT_ID;
+  const clientId = process.env.ENTRA_CLIENT_ID;
+  const clientSecret = process.env.ENTRA_CLIENT_SECRET;
+  if (!tenantId || !clientId || !clientSecret) {
+    throw new Error("ENTRA_TENANT_ID/ENTRA_CLIENT_ID/ENTRA_CLIENT_SECRET must be set");
+  }
   return { tenantId, clientId, clientSecret };
 }
 
-async function getCca() {
-  const { tenantId, clientId, clientSecret } = await getGraphEnv();
-  const cacheKey = `${tenantId}:${clientId}:${clientSecret}`;
-  if (cachedCca?.cacheKey === cacheKey) return cachedCca.client;
-  const client = new ConfidentialClientApplication({
+function getCca() {
+  if (cachedCca) return cachedCca;
+  const { tenantId, clientId, clientSecret } = getGraphEnv();
+  cachedCca = new ConfidentialClientApplication({
     auth: {
       clientId,
       authority: `https://login.microsoftonline.com/${tenantId}`,
       clientSecret,
     },
   });
-  cachedCca = { cacheKey, client };
-  return client;
+  return cachedCca;
 }
 
 async function getAppToken() {
-  const result = await (await getCca()).acquireTokenByClientCredential({
+  const result = await getCca().acquireTokenByClientCredential({
     scopes: ["https://graph.microsoft.com/.default"],
   });
   if (!result?.accessToken) {
@@ -39,7 +40,6 @@ async function getAppToken() {
 
 export async function graphGet(path: string) {
   const token = await getAppToken();
-  const timeoutMs = await getPositiveIntRuntimeEnv("GRAPH_FETCH_TIMEOUT_MS", getPositiveIntEnv("GRAPH_FETCH_TIMEOUT_MS", 15000));
   let res: Response;
   try {
     res = await fetchWithTimeout(
@@ -50,7 +50,7 @@ export async function graphGet(path: string) {
         },
         cache: "no-store",
       },
-      timeoutMs
+      GRAPH_FETCH_TIMEOUT_MS
     );
   } catch (err) {
     if (err instanceof HttpTimeoutError) {
@@ -67,7 +67,6 @@ export async function graphGet(path: string) {
 
 export async function graphDelete(path: string) {
   const token = await getAppToken();
-  const timeoutMs = await getPositiveIntRuntimeEnv("GRAPH_FETCH_TIMEOUT_MS", getPositiveIntEnv("GRAPH_FETCH_TIMEOUT_MS", 15000));
   let res: Response;
   try {
     res = await fetchWithTimeout(
@@ -79,7 +78,7 @@ export async function graphDelete(path: string) {
         },
         cache: "no-store",
       },
-      timeoutMs
+      GRAPH_FETCH_TIMEOUT_MS
     );
   } catch (err) {
     if (err instanceof HttpTimeoutError) {

@@ -1,3 +1,4 @@
+import os
 import random
 import threading
 import time
@@ -7,7 +8,6 @@ from typing import Any, Dict, Iterable, Iterator, Optional
 import requests
 from msal import ConfidentialClientApplication
 
-from app.runtime_config import get_float_runtime_env, get_int_runtime_env, get_runtime_env, require_runtime_env
 from app.runtime_logger import emit
 
 
@@ -27,17 +27,17 @@ class GraphError(Exception):
 
 class GraphClient:
     def __init__(self):
-        self._graph_base = (get_runtime_env("GRAPH_BASE", DEFAULT_GRAPH_BASE) or DEFAULT_GRAPH_BASE).rstrip("/")
+        self._graph_base = os.getenv("GRAPH_BASE", DEFAULT_GRAPH_BASE).rstrip("/")
 
-        tenant_id = require_runtime_env("ENTRA_TENANT_ID")
-        client_id = require_runtime_env("ENTRA_CLIENT_ID")
-        client_secret = require_runtime_env("ENTRA_CLIENT_SECRET")
+        tenant_id = os.getenv("ENTRA_TENANT_ID")
+        client_id = os.getenv("ENTRA_CLIENT_ID")
+        client_secret = os.getenv("ENTRA_CLIENT_SECRET")
         if not tenant_id or not client_id or not client_secret:
             raise RuntimeError("ENTRA_TENANT_ID/ENTRA_CLIENT_ID/ENTRA_CLIENT_SECRET must be set")
 
-        self._max_retries = get_int_runtime_env("GRAPH_MAX_RETRIES", 5)
-        self._connect_timeout = get_float_runtime_env("GRAPH_CONNECT_TIMEOUT", 10)
-        self._read_timeout = get_float_runtime_env("GRAPH_READ_TIMEOUT", 60)
+        self._max_retries = int(os.getenv("GRAPH_MAX_RETRIES", "5"))
+        self._connect_timeout = float(os.getenv("GRAPH_CONNECT_TIMEOUT", "10"))
+        self._read_timeout = float(os.getenv("GRAPH_READ_TIMEOUT", "60"))
 
         self._cca = ConfidentialClientApplication(
             client_id,
@@ -148,12 +148,13 @@ class GraphClient:
 
             if not resp.ok:
                 text = resp.text or ""
+                message = text[:400] if text else "request_failed"
                 emit(
                     "ERROR",
                     "GRAPH",
-                    f"Graph request failed with status={resp.status_code}: method={method} url={url}",
+                    f"Graph request failed with status={resp.status_code}: method={method} url={url} error={message}",
                 )
-                raise GraphError(resp.status_code, "request_failed", url, text)
+                raise GraphError(resp.status_code, message, url, text)
 
             if resp.status_code == 204:
                 return {}
@@ -222,12 +223,13 @@ class GraphClient:
 
             if not resp.ok:
                 text = resp.text or ""
+                message = text[:400] if text else "request_failed"
                 emit(
                     "ERROR",
                     "GRAPH",
-                    f"Graph request failed with status={resp.status_code}: method={method} url={url}",
+                    f"Graph request failed with status={resp.status_code}: method={method} url={url} error={message}",
                 )
-                raise GraphError(resp.status_code, "request_failed", url, text)
+                raise GraphError(resp.status_code, message, url, text)
 
             return resp.text or ""
 

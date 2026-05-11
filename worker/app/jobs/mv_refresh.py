@@ -1,3 +1,4 @@
+import os
 import re
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, Optional
@@ -5,12 +6,11 @@ from typing import Any, Dict, Iterable, Optional
 from psycopg2 import sql
 
 from app import db
-from app.runtime_config import get_int_runtime_env
 from app.runtime_logger import emit
 from app.utils import log_audit_event, log_job_run_log
 
 
-DEFAULT_MAX_VIEWS_PER_RUN = 20
+DEFAULT_MAX_VIEWS_PER_RUN = int(os.getenv("MV_REFRESH_MAX_VIEWS_PER_RUN", "20"))
 _MV_NAME_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 
 
@@ -23,7 +23,7 @@ def _get_mv_refresh_runtime_config(job_id: str) -> Dict[str, Any]:
     config = row.get("config") if isinstance(row, dict) else {}
     if not isinstance(config, dict):
         config = {}
-    max_views_per_run = int(config.get("max_views_per_run", get_int_runtime_env("MV_REFRESH_MAX_VIEWS_PER_RUN", DEFAULT_MAX_VIEWS_PER_RUN)))
+    max_views_per_run = int(config.get("max_views_per_run", DEFAULT_MAX_VIEWS_PER_RUN))
     return {"max_views_per_run": max(1, min(max_views_per_run, 200))}
 
 

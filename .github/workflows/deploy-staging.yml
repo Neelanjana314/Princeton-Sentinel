@@ -15,7 +15,7 @@ permissions:
   contents: read
 
 env:
-  STAGING_VERSION: 3.8.1
+  STAGING_VERSION: 3.8.0
   AZ_RESOURCE_GROUP: ${{ vars.AZ_RESOURCE_GROUP }}
   AZ_ACR_NAME: ${{ vars.AZ_ACR_NAME }}
   AZ_WEB_APP_NAME: ${{ vars.AZ_WEB_APP_NAME }}

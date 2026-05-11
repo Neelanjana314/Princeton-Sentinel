@@ -1,7 +1,7 @@
 import { fetchWithTimeout, getPositiveIntEnv, HttpTimeoutError } from "@/app/lib/http";
-import { getPositiveIntRuntimeEnv, requireRuntimeEnv } from "@/app/lib/runtime-env";
 
 const WORKER_INTERNAL_TOKEN_HEADER = "x-worker-internal-token";
+const DEFAULT_WORKER_TIMEOUT_MS = getPositiveIntEnv("WORKER_API_TIMEOUT_MS", 10000);
 type CallWorkerResult = { res: Response; text: string };
 type CallWorkerOverride = (path: string, init?: RequestInit) => Promise<CallWorkerResult>;
 
@@ -23,16 +23,23 @@ function normalizeBaseUrl(base: string): string {
   return base.replace(/\/+$/, "");
 }
 
-async function buildWorkerUrl(path: string): Promise<string> {
+function buildWorkerUrl(path: string): string {
   if (path.startsWith("http://") || path.startsWith("https://")) return path;
 
-  const base = await requireRuntimeEnv("WORKER_API_URL");
+  const base = process.env.WORKER_API_URL;
+  if (!base) {
+    throw new Error("WORKER_API_URL not set");
+  }
   const trimmedPath = path.startsWith("/") ? path : `/${path}`;
   return `${normalizeBaseUrl(base)}${trimmedPath}`;
 }
 
-async function getInternalToken(): Promise<string> {
-  return requireRuntimeEnv("WORKER_INTERNAL_API_TOKEN");
+function getInternalToken(): string {
+  const token = process.env.WORKER_INTERNAL_API_TOKEN;
+  if (!token) {
+    throw new Error("WORKER_INTERNAL_API_TOKEN not set");
+  }
+  return token;
 }
 
 export function isWorkerTimeoutError(err: unknown): boolean {
@@ -43,14 +50,13 @@ export async function callWorker(path: string, init: RequestInit = {}): Promise<
   if (callWorkerOverride) {
     return callWorkerOverride(path, init);
   }
-  const url = await buildWorkerUrl(path);
-  const token = await getInternalToken();
-  const timeoutMs = await getPositiveIntRuntimeEnv("WORKER_API_TIMEOUT_MS", getPositiveIntEnv("WORKER_API_TIMEOUT_MS", 10000));
+  const url = buildWorkerUrl(path);
+  const token = getInternalToken();
 
   const headers = new Headers(init.headers || {});
   headers.set(WORKER_INTERNAL_TOKEN_HEADER, token);
 
-  const res = await fetchWithTimeout(url, { ...init, headers, cache: "no-store" }, timeoutMs);
+  const res = await fetchWithTimeout(url, { ...init, headers, cache: "no-store" }, DEFAULT_WORKER_TIMEOUT_MS);
   const text = await res.text();
   return { res, text };
 }

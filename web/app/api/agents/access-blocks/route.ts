@@ -17,16 +17,15 @@ import { getNonEmptyString, parseRequestBody } from "@/app/lib/request-body";
 import { withApiRequestTiming } from "@/app/lib/request-timing";
 import { getDvColumns, getDvEntitySet, type DvColumns } from "@/app/lib/dv-columns";
 import { LicenseFeatureError, requireLicenseFeature } from "@/app/lib/license";
-import { getRuntimeEnv } from "@/app/lib/runtime-env";
 
 export const dynamic = "force-dynamic";
 
 type DvRow = Record<string, any>;
 
-async function getDvConfig() {
-  const prefix = (await getRuntimeEnv("DATAVERSE_COLUMN_PREFIX")) || "";
+function getDvConfig() {
+  const prefix = process.env.DATAVERSE_COLUMN_PREFIX || "";
   const cols = getDvColumns(prefix);
-  const entitySet = getDvEntitySet((await getRuntimeEnv("DATAVERSE_TABLE_URL")) || "");
+  const entitySet = getDvEntitySet(process.env.DATAVERSE_TABLE_URL || "");
   const selectCols = [
     cols.id, cols.agentname, cols.username, cols.disableflag,
     cols.reason, cols.lastmodifiedby, cols.lastseeninsync, "modifiedon",
@@ -60,7 +59,7 @@ async function fetchDataverseRows(entitySet: string, selectCols: string): Promis
 
 const getHandler = async function GET() {
   await requireAdmin();
-  const { entitySet, cols, selectCols } = await getDvConfig();
+  const { entitySet, cols, selectCols } = getDvConfig();
 
   let rows: DvRow[];
   try {
@@ -240,7 +239,7 @@ const postHandler = async function POST(req: Request) {
     return NextResponse.json({ error: "block_scope must be 'agent' or 'all'" }, { status: 400 });
   }
 
-  const { entitySet: dvEntitySet, cols, selectCols } = await getDvConfig();
+  const { entitySet: dvEntitySet, cols, selectCols } = getDvConfig();
   let rows: DvRow[];
   try {
     rows = await fetchDataverseRows(dvEntitySet, selectCols);

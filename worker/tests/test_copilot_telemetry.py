@@ -11,36 +11,7 @@ if str(ROOT) not in sys.path:
 from app.jobs import copilot_telemetry
 
 
-class FakeAppInsightsResponse:
-    def raise_for_status(self):
-        return None
-
-    def json(self):
-        return {
-            "tables": [
-                {
-                    "columns": [{"name": "conversationId"}, {"name": "event_count"}],
-                    "rows": [["session-1", 3]],
-                }
-            ]
-        }
-
-
 class CopilotTelemetryTests(unittest.TestCase):
-    @patch("app.jobs.copilot_telemetry.requests.post")
-    @patch.object(copilot_telemetry, "APPINSIGHTS_APP_ID", "app-id")
-    @patch.object(copilot_telemetry, "APPINSIGHTS_API_KEY", "api-key")
-    def test_run_kql_uses_configured_app_insights_credentials(self, mock_post):
-        mock_post.return_value = FakeAppInsightsResponse()
-
-        rows = copilot_telemetry._run_kql("customEvents | take 1")
-
-        self.assertEqual(rows, [{"conversationId": "session-1", "event_count": 3}])
-        mock_post.assert_called_once()
-        self.assertEqual(mock_post.call_args.args[0], f"{copilot_telemetry.APPINSIGHTS_BASE}/app-id/query")
-        self.assertEqual(mock_post.call_args.kwargs["headers"]["x-api-key"], "api-key")
-        self.assertEqual(mock_post.call_args.kwargs["json"]["query"], "customEvents | take 1")
-
     @patch("app.jobs.copilot_telemetry.emit")
     @patch("app.jobs.copilot_telemetry.log_job_run_log")
     @patch("app.jobs.copilot_telemetry.enqueue_impacted_mvs_for_tables")

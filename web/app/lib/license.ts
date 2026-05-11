@@ -4,7 +4,6 @@ import type { PoolClient } from "pg";
 
 import { getLocalTestingState } from "./local-testing-state";
 import { isLocalDockerDeployment } from "./runtime";
-import { getRuntimeEnv } from "./runtime-env";
 
 export const LICENSE_SCHEMA_VERSION = 1;
 export const LICENSE_SIGNATURE_DELIMITER = "\n---SIGNATURE---\n";
@@ -177,8 +176,8 @@ export function canonicalizeLicensePayload(value: unknown): string {
   return JSON.stringify(sortJsonValue(value));
 }
 
-async function getLicenseCacheTtlMs() {
-  const raw = Number((await getRuntimeEnv("LICENSE_CACHE_TTL_SECONDS")) || "300");
+function getLicenseCacheTtlMs() {
+  const raw = Number(process.env.LICENSE_CACHE_TTL_SECONDS || "300");
   if (!Number.isFinite(raw) || raw <= 0) {
     return 300_000;
   }
@@ -216,8 +215,8 @@ function getReadOnlyFallbackSummary(error: string | null, overrides?: Partial<Ef
   };
 }
 
-async function getLocalDockerLicenseSummary(): Promise<EffectiveLicenseSummary> {
-  const tenantId = asNonEmptyString(await getRuntimeEnv("ENTRA_TENANT_ID")) || "local-docker";
+function getLocalDockerLicenseSummary(): EffectiveLicenseSummary {
+  const tenantId = asNonEmptyString(process.env.ENTRA_TENANT_ID) || "local-docker";
   const features = getFullyEnabledLicenseFeatures();
 
   return {
@@ -322,7 +321,7 @@ async function loadLicensePublicKey(): Promise<string> {
     return publicKeyOverride;
   }
 
-  const publicKeyPath = asNonEmptyString(await getRuntimeEnv("LICENSE_PUBLIC_KEY_PATH"));
+  const publicKeyPath = asNonEmptyString(process.env.LICENSE_PUBLIC_KEY_PATH);
   if (!publicKeyPath) {
     throw new Error("license_public_key_path_not_configured");
   }
@@ -392,7 +391,7 @@ export async function inspectLicenseArtifact(rawLicenseText: string): Promise<Li
   }
 }
 
-async function summarizeInspection(inspection: LicenseInspection, metadata: SummaryMetadata): Promise<EffectiveLicenseSummary> {
+function summarizeInspection(inspection: LicenseInspection, metadata: SummaryMetadata): EffectiveLicenseSummary {
   if (inspection.verificationStatus !== "verified" || !inspection.payload) {
     return getReadOnlyFallbackSummary(inspection.verificationError, {
       artifactId: metadata.artifactId,
@@ -402,7 +401,7 @@ async function summarizeInspection(inspection: LicenseInspection, metadata: Summ
     });
   }
 
-  const tenantId = asNonEmptyString(await getRuntimeEnv("ENTRA_TENANT_ID"));
+  const tenantId = asNonEmptyString(process.env.ENTRA_TENANT_ID);
   if (!tenantId) {
     return getReadOnlyFallbackSummary("entra_tenant_id_not_configured", {
       artifactId: metadata.artifactId,
@@ -462,18 +461,19 @@ export async function summarizeLicenseArtifactText(params: {
   });
 }
 
-async function summarizeArtifactRow(row: LicenseArtifactRow): Promise<EffectiveLicenseSummary> {
-  const inspection = await inspectLicenseArtifact(row.raw_license_text);
-  return summarizeInspection(inspection, {
-    artifactId: row.artifact_id,
-    sha256: inspection.sha256,
-    uploadedAt: row.uploaded_at,
-    uploadedBy: {
-      oid: row.uploaded_by_oid,
-      upn: row.uploaded_by_upn,
-      name: row.uploaded_by_name,
-    },
-  });
+function summarizeArtifactRow(row: LicenseArtifactRow): Promise<EffectiveLicenseSummary> {
+  return inspectLicenseArtifact(row.raw_license_text).then((inspection) =>
+    summarizeInspection(inspection, {
+      artifactId: row.artifact_id,
+      sha256: inspection.sha256,
+      uploadedAt: row.uploaded_at,
+      uploadedBy: {
+        oid: row.uploaded_by_oid,
+        upn: row.uploaded_by_upn,
+        name: row.uploaded_by_name,
+      },
+    })
+  );
 }
 
 async function getActiveLicenseMeta(): Promise<ActiveLicenseMetaRow | null> {
@@ -540,7 +540,7 @@ export async function getCurrentLicenseSummary(): Promise<EffectiveLicenseSummar
   const cacheKey = localTestingState
     ? `local:${localTestingState.emulateLicenseEnabled ? "enabled" : "disabled"}:${localTestingState.updatedAt || "none"}`
     : `${meta?.artifact_id || "missing"}:${meta?.sha256 || "none"}:${normalizeTimestamp(meta?.updated_at) || "none"}`;
-  const ttlMs = await getLicenseCacheTtlMs();
+  const ttlMs = getLicenseCacheTtlMs();
 
   if (cachedSummary && cachedSummary.cacheKey === cacheKey && cachedSummary.expiresAtMs > Date.now()) {
     return cachedSummary.summary;
@@ -550,7 +550,7 @@ export async function getCurrentLicenseSummary(): Promise<EffectiveLicenseSummar
 
   if (localTestingState) {
     summary = localTestingState.emulateLicenseEnabled
-      ? await getLocalDockerLicenseSummary()
+      ? getLocalDockerLicenseSummary()
       : getReadOnlyFallbackSummary("license_missing", { status: "missing", verificationStatus: "missing" });
   } else if (!meta?.artifact_id) {
     summary = getReadOnlyFallbackSummary("license_missing", { status: "missing", verificationStatus: "missing" });

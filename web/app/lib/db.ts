@@ -1,27 +1,25 @@
 import { Pool, type PoolClient } from "pg";
 import { beginDbTiming } from "@/app/lib/request-timing";
-import { requireRuntimeEnv } from "@/app/lib/runtime-env";
 
 declare global {
   // eslint-disable-next-line no-var
-  var _pgPool: { connectionString: string; pool: Pool } | undefined;
+  var _pgPool: Pool | undefined;
 }
 
-async function getPool() {
-  const connectionString = await requireRuntimeEnv("DATABASE_URL");
-  if (global._pgPool?.connectionString !== connectionString) {
-    const previousPool = global._pgPool?.pool;
-    global._pgPool = { connectionString, pool: new Pool({ connectionString }) };
-    if (previousPool) {
-      void previousPool.end().catch(() => {});
-    }
+function getPool() {
+  const connectionString = process.env.DATABASE_URL;
+  if (!connectionString) {
+    throw new Error("DATABASE_URL is not set");
   }
-  return global._pgPool.pool;
+  if (!global._pgPool) {
+    global._pgPool = new Pool({ connectionString });
+  }
+  return global._pgPool;
 }
 
 export async function query<T = any>(text: string, params?: any[]): Promise<T[]> {
   const endDbTiming = beginDbTiming();
-  const result = await (await getPool()).query(text, params).finally(() => {
+  const result = await getPool().query(text, params).finally(() => {
     endDbTiming();
   });
   return result.rows;
@@ -48,7 +46,7 @@ function wrapClientWithTiming(client: PoolClient): PoolClient {
 }
 
 export async function withTransaction<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {
-  const client = await (await getPool()).connect();
+  const client = await getPool().connect();
   const timedClient = wrapClientWithTiming(client);
   try {
     await timedClient.query("BEGIN");
