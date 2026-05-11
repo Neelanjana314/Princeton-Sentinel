@@ -559,6 +559,13 @@ class DeployClientEnvironmentTests(unittest.TestCase):
         self.assertIn('exec node key-vault-entrypoint.cjs', package_script)
         self.assertNotIn(removed_runtime_secret, package_script)
 
+    def test_package_worker_runtime_validation_disables_key_vault_hydration(self):
+        package_script = (ROOT / "scripts" / "ci" / "package-worker-runtime.sh").read_text()
+
+        self.assertIn('AZ_KEY_VAULT_URL=""', package_script)
+        self.assertIn("from app.main import app", package_script)
+        self.assertIn("gunicorn", package_script)
+
     def test_sync_key_vault_runtime_config_writes_runtime_values_as_secrets(self):
         source = {
             "app_version": "3.3.0",

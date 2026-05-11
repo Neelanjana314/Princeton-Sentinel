@@ -80,10 +80,12 @@ if [[ ! -f "${requirements_file}" ]]; then
 fi
 
 WORKER_ENABLE_BACKGROUND_THREADS=false \
+AZ_KEY_VAULT_URL="" \
 PYTHONPATH="${validation_vendor_dir}:${runtime_dir}" \
 "${python_bin}" -c 'from app.main import app; print(app.name)'
 
 WORKER_ENABLE_BACKGROUND_THREADS=false \
+AZ_KEY_VAULT_URL="" \
 PYTHONPATH="${validation_vendor_dir}:${runtime_dir}" \
 "${python_bin}" -m gunicorn \
   --check-config \
