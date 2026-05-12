@@ -9,7 +9,7 @@
     "dev": "next dev -p 3000",
     "build": "next build --webpack",
     "start": "next start -p 3000",
-    "test": "rm -rf .tmp-tests && tsc -p tsconfig.test.json && node --test $(find .tmp-tests/tests -type f -name '*.test.js' | sort) && rm -rf .tmp-tests"
+    "test": "node scripts/run-tests.cjs"
   },
   "dependencies": {
     "@azure/msal-node": "2.14.0",

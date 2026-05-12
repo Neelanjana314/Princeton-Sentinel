@@ -8,18 +8,12 @@ All methods return a ``(success, detail)`` tuple so callers can persist
 ``entra_sync_status`` / ``entra_sync_error`` without try/except boilerplate.
 """
 
-import os
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
 from app.graph_client import GraphClient, GraphError
+from app.runtime_config import get_runtime_env
 from app.runtime_logger import emit
-
-# ── Configuration ──────────────────────────────────────────────────────────
-
-# The Entra *Application (client) ID* of the Copilot Studio bot registration.
-# This is what goes into the CA policy's includeApplications list.
-COPILOT_APP_ID = os.getenv("COPILOT_APP_ID", "")
 
 POLICY_PREFIX = "Sentinel-Block-"
 
@@ -106,7 +100,8 @@ class ConditionalAccessManager:
 
         Creates the policy if it does not exist; patches it otherwise.
         """
-        if not COPILOT_APP_ID:
+        copilot_app_id = (get_runtime_env("COPILOT_APP_ID") or "").strip()
+        if not copilot_app_id:
             return CAResult(
                 success=False,
                 error="COPILOT_APP_ID env var is not configured",
@@ -148,7 +143,7 @@ class ConditionalAccessManager:
             return CAResult(success=True, policy_id=policy_id)
 
         # ── No policy yet → create ─────────────────────────────────────
-        body = _build_policy_body(display_name, [user_id], COPILOT_APP_ID)
+        body = _build_policy_body(display_name, [user_id], copilot_app_id)
         try:
             result = self._graph.request_json("POST", CA_BASE, json=body)
         except GraphError as exc:

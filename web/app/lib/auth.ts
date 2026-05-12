@@ -1,10 +1,11 @@
 import AzureADProvider from "next-auth/providers/azure-ad";
 import type { NextAuthOptions } from "next-auth";
 import { getServerSession } from "next-auth/next";
-import { getAuthCookiePolicies } from "./auth-cookies";
+import { getAuthCookiePoliciesAsync } from "./auth-cookies";
 import { getBootScopedAuthSecret } from "./auth-secret";
 import { buildPostAuthBridgeUrl } from "./callback-url";
 import { clearDelegatedAuthState, saveDelegatedAuthState } from "./delegated-auth-store";
+import { getRuntimeEnv, requireRuntimeEnv } from "./runtime-env";
 
 type RequireAuthResult = {
   session: any;
@@ -14,13 +15,10 @@ type RequireAuthResult = {
 let requireUserOverride: (() => Promise<RequireAuthResult>) | null = null;
 let requireAdminOverride: (() => Promise<RequireAuthResult>) | null = null;
 
-function getAuthEnv() {
-  const tenantId = process.env.ENTRA_TENANT_ID;
-  const clientId = process.env.ENTRA_CLIENT_ID;
-  const clientSecret = process.env.ENTRA_CLIENT_SECRET;
-  if (!tenantId || !clientId || !clientSecret) {
-    throw new Error("ENTRA_TENANT_ID/ENTRA_CLIENT_ID/ENTRA_CLIENT_SECRET must be set");
-  }
+async function getAuthEnv() {
+  const tenantId = await requireRuntimeEnv("ENTRA_TENANT_ID");
+  const clientId = await requireRuntimeEnv("ENTRA_CLIENT_ID");
+  const clientSecret = await requireRuntimeEnv("ENTRA_CLIENT_SECRET");
   return { tenantId, clientId, clientSecret };
 }
 
@@ -51,8 +49,8 @@ function decodeJwtPayload(token?: string): Record<string, any> | null {
   }
 }
 
-export function getAuthOptions(): NextAuthOptions {
-  const { tenantId, clientId, clientSecret } = getAuthEnv();
+export async function getAuthOptions(): Promise<NextAuthOptions> {
+  const { tenantId, clientId, clientSecret } = await getAuthEnv();
   return {
     secret: getBootScopedAuthSecret(),
     providers: [
@@ -91,7 +89,7 @@ export function getAuthOptions(): NextAuthOptions {
       }),
     ],
     session: { strategy: "jwt" },
-    cookies: getAuthCookiePolicies(),
+    cookies: await getAuthCookiePoliciesAsync(),
     pages: {
       signIn: "/signin/account",
       signOut: "/signout",
@@ -166,21 +164,21 @@ export function getAuthOptions(): NextAuthOptions {
 }
 
 export async function getSession() {
-  return getServerSession(getAuthOptions());
+  return getServerSession(await getAuthOptions());
 }
 
 export function getGroupsFromSession(session: any): string[] {
   return (session?.groups as string[]) || (session?.user?.groups as string[]) || [];
 }
 
-export function isAdmin(groups: string[]) {
-  const adminGroup = process.env.ADMIN_GROUP_ID;
+export async function isAdmin(groups: string[]) {
+  const adminGroup = await getRuntimeEnv("ADMIN_GROUP_ID");
   return adminGroup ? groups.includes(adminGroup) : false;
 }
 
-export function isUser(groups: string[]) {
-  const userGroup = process.env.USER_GROUP_ID;
-  const adminGroup = process.env.ADMIN_GROUP_ID;
+export async function isUser(groups: string[]) {
+  const userGroup = await getRuntimeEnv("USER_GROUP_ID");
+  const adminGroup = await getRuntimeEnv("ADMIN_GROUP_ID");
   if (adminGroup && groups.includes(adminGroup)) return true;
   return userGroup ? groups.includes(userGroup) : false;
 }
@@ -191,7 +189,7 @@ export async function requireUser() {
   }
   const session = await getSession();
   const groups = getGroupsFromSession(session);
-  if (!session || !isUser(groups)) {
+  if (!session || !(await isUser(groups))) {
     throw new Error("unauthorized");
   }
   return { session, groups };
@@ -203,7 +201,7 @@ export async function requireAdmin() {
   }
   const session = await getSession();
   const groups = getGroupsFromSession(session);
-  if (!session || !isAdmin(groups)) {
+  if (!session || !(await isAdmin(groups))) {
     throw new Error("forbidden");
   }
   return { session, groups };

@@ -15,7 +15,7 @@ permissions:
   contents: read
 
 env:
-  STAGING_VERSION: 3.8.0
+  STAGING_VERSION: 3.8.1
   AZ_RESOURCE_GROUP: ${{ vars.AZ_RESOURCE_GROUP }}
   AZ_ACR_NAME: ${{ vars.AZ_ACR_NAME }}
   AZ_WEB_APP_NAME: ${{ vars.AZ_WEB_APP_NAME }}
@@ -138,7 +138,7 @@ jobs:
           set -euo pipefail
           cd web
           npm ci
-          APP_VERSION="${APP_VERSION}" npm test
+          PRINCETON_SENTINEL_DISABLE_KEY_VAULT_RUNTIME=true APP_VERSION="${APP_VERSION}" npm test
           APP_VERSION="${APP_VERSION}" npm run build
 
       - name: Package web runtime artifact
@@ -248,7 +248,7 @@ jobs:
           set -euo pipefail
           python -m pip install --upgrade pip
           pip install -r worker/requirements.txt
-          python -m unittest discover -s worker/tests -p "test_*.py"
+          PRINCETON_SENTINEL_DISABLE_KEY_VAULT_RUNTIME=true python -m unittest discover -s worker/tests -p "test_*.py"
           python -m py_compile worker/app/*.py worker/app/jobs/*.py
 
       - name: Package worker runtime artifact

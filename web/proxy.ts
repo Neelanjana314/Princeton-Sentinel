@@ -13,9 +13,9 @@ import {
   LAST_ACCOUNT_HINT_MAX_AGE_SECONDS,
   sanitizeAccountHint,
 } from "@/app/lib/account-hint";
-import { getSessionCookieName, shouldUseSecureAuthCookies } from "@/app/lib/auth-cookies";
 import { getBootScopedAuthSecret } from "@/app/lib/auth-secret";
 import { attachCsrfCookie, CSRF_REQUEST_TOKEN_HEADER, ensureCsrfToken, getCsrfCookieName } from "@/app/lib/csrf";
+import { getProxyRuntimeEnv } from "./app/lib/proxy-runtime-env";
 import {
   applySecurityHeaders,
   applySensitiveNoCacheHeaders,
@@ -54,6 +54,22 @@ function isApiRequest(pathname: string) {
 
 function isPublicAsset(pathname: string) {
   return /\.[^/]+$/.test(pathname);
+}
+
+async function shouldUseSecureProxyAuthCookies() {
+  const authUrl = (await getProxyRuntimeEnv("NEXTAUTH_URL")) || process.env.AUTH_URL;
+  if (authUrl) {
+    try {
+      return new URL(authUrl).protocol === "https:";
+    } catch {
+      return authUrl.startsWith("https://");
+    }
+  }
+  return Boolean(process.env.VERCEL);
+}
+
+async function getProxySessionCookieName() {
+  return `${(await shouldUseSecureProxyAuthCookies()) ? "__Host-" : ""}next-auth.session-token`;
 }
 
 function createContentSecurityPolicyNonce() {
@@ -135,13 +151,13 @@ function clearLastAccountHintCookie(response: NextResponse) {
   });
 }
 
-function setLastAccountHintCookie(response: NextResponse, hint: string) {
+async function setLastAccountHintCookie(response: NextResponse, hint: string) {
   response.cookies.set({
     name: LAST_ACCOUNT_HINT_COOKIE,
     value: hint,
     httpOnly: true,
     sameSite: "strict",
-    secure: shouldUseSecureAuthCookies(),
+    secure: await shouldUseSecureProxyAuthCookies(),
     path: "/",
     maxAge: LAST_ACCOUNT_HINT_MAX_AGE_SECONDS,
   });
@@ -164,14 +180,14 @@ export async function proxy(req: NextRequest) {
     const token = await getToken({
       req,
       secret: getBootScopedAuthSecret(),
-      secureCookie: shouldUseSecureAuthCookies(),
-      cookieName: getSessionCookieName(),
+      secureCookie: await shouldUseSecureProxyAuthCookies(),
+      cookieName: await getProxySessionCookieName(),
     });
     const accountHint = sanitizeAccountHint(
       typeof token?.upn === "string" ? token.upn : typeof token?.email === "string" ? token.email : undefined,
     );
     if (accountHint) {
-      setLastAccountHintCookie(response, accountHint);
+      await setLastAccountHintCookie(response, accountHint);
     } else {
       clearLastAccountHintCookie(response);
     }
@@ -193,8 +209,8 @@ export async function proxy(req: NextRequest) {
   const token = await getToken({
     req,
     secret: getBootScopedAuthSecret(),
-    secureCookie: shouldUseSecureAuthCookies(),
-    cookieName: getSessionCookieName(),
+    secureCookie: await shouldUseSecureProxyAuthCookies(),
+    cookieName: await getProxySessionCookieName(),
   });
   if (!token) {
     if (isApiRequest(pathname)) {
@@ -210,8 +226,10 @@ export async function proxy(req: NextRequest) {
   }
 
   const groups = (token.groups as string[]) || [];
-  const adminGroup = process.env.ADMIN_GROUP_ID;
-  const userGroup = process.env.USER_GROUP_ID;
+  const [adminGroup, userGroup] = await Promise.all([
+    getProxyRuntimeEnv("ADMIN_GROUP_ID"),
+    getProxyRuntimeEnv("USER_GROUP_ID"),
+  ]);
   const isAdmin = adminGroup ? groups.includes(adminGroup) : false;
   const isUser = isAdmin || (userGroup ? groups.includes(userGroup) : false);
   const existingCsrfToken = req.cookies.get(getCsrfCookieName())?.value;

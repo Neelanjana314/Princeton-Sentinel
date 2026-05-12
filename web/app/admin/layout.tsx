@@ -14,7 +14,7 @@ export const dynamic = "force-dynamic";
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const { session, groups } = await requireAdmin();
   const userLabel = session.user?.name ?? session.user?.email ?? "Signed in";
-  const canAdmin = isAdmin(groups);
+  const canAdmin = await isAdmin(groups);
   const appVersion = getAppVersion();
   const [featureFlagsPayload, localTestingMenuState, csrfToken] = await Promise.all([
     getFeatureFlagsPayload(),

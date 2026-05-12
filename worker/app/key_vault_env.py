@@ -14,6 +14,15 @@ def _is_present(value: str | None) -> bool:
     return value is not None and value.strip() != ""
 
 
+def _is_truthy(value: str | None) -> bool:
+    return value is not None and value.strip().lower() in {"1", "true", "t", "yes", "y", "on"}
+
+
+def is_key_vault_runtime_disabled(env: dict[str, str] | None = None) -> bool:
+    target_env = env if env is not None else os.environ
+    return _is_truthy(target_env.get("PRINCETON_SENTINEL_DISABLE_KEY_VAULT_RUNTIME"))
+
+
 def env_key_to_secret_name(key: str) -> str:
     return key.replace("_", "-")
 
@@ -130,6 +139,8 @@ def hydrate_env_from_key_vault(
     vault_url: str | None = None,
 ) -> dict[str, Any]:
     env = env if env is not None else os.environ
+    if is_key_vault_runtime_disabled(env):
+        return {"vault_configured": False, "hydrated": [], "missing": []}
     normalized_vault_url = normalize_vault_url(vault_url or env.get("AZ_KEY_VAULT_URL"))
     if not normalized_vault_url:
         return {"vault_configured": False, "hydrated": [], "missing": []}

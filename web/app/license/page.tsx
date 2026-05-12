@@ -65,7 +65,7 @@ async function LicensePage({ searchParams }: LicensePageProps) {
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
 
   const userLabel = session.user?.name ?? session.user?.email ?? "Signed in";
-  const canAdmin = isAdmin(groups);
+  const canAdmin = await isAdmin(groups);
   const uploadSuccess = readParam(resolvedSearchParams?.uploaded) === "1";
   const uploadStatus = readParam(resolvedSearchParams?.status);
   const clearedSuccess = readParam(resolvedSearchParams?.cleared) === "1";

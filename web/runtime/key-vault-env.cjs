@@ -13,6 +13,15 @@ function isPresent(value) {
   return typeof value === "string" && value.trim() !== "";
 }
 
+function isTruthy(value) {
+  if (!value) return false;
+  return ["1", "true", "t", "yes", "y", "on"].includes(String(value).trim().toLowerCase());
+}
+
+function isKeyVaultRuntimeDisabled(env = process.env) {
+  return isTruthy(env.PRINCETON_SENTINEL_DISABLE_KEY_VAULT_RUNTIME);
+}
+
 function envKeyToSecretName(key) {
   return key.replaceAll("_", "-");
 }
@@ -119,6 +128,9 @@ async function hydrateEnvFromKeyVault({
   if (!service) {
     throw new Error("service is required");
   }
+  if (isKeyVaultRuntimeDisabled(env)) {
+    return { vaultConfigured: false, hydrated: [], missing: [] };
+  }
   const normalizedVaultUrl = normalizeVaultUrl(vaultUrl);
   if (!normalizedVaultUrl) {
     return { vaultConfigured: false, hydrated: [], missing: [] };
@@ -169,6 +181,7 @@ module.exports = {
   collectServiceKeys,
   envKeyToSecretName,
   hydrateEnvFromKeyVault,
+  isKeyVaultRuntimeDisabled,
   KEY_VAULT_UNSET_VALUE,
   loadManifest,
   normalizeVaultUrl,

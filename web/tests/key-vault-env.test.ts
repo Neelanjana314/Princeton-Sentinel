@@ -36,6 +36,28 @@ test("key vault hydration is a no-op without vault url", async () => {
   assert.deepEqual(env, {});
 });
 
+test("key vault hydration is a no-op when runtime is disabled", async () => {
+  const env: Record<string, string> = {
+    AZ_KEY_VAULT_URL: "https://vault.example",
+    PRINCETON_SENTINEL_DISABLE_KEY_VAULT_RUNTIME: "true",
+  };
+  let called = false;
+  const result = await keyVaultEnv.hydrateEnvFromKeyVault({
+    service: "web",
+    env,
+    manifest,
+    tokenProvider: async () => "token",
+    fetchImpl: async () => {
+      called = true;
+      return jsonResponse(200, { value: "from-vault" });
+    },
+  });
+
+  assert.equal(result.vaultConfigured, false);
+  assert.equal(called, false);
+  assert.equal(env.DATABASE_URL, undefined);
+});
+
 test("key vault hydration preserves existing environment values", async () => {
   const env: Record<string, string> = {
     AZ_KEY_VAULT_URL: "https://vault.example",

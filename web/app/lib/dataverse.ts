@@ -2,6 +2,7 @@ import "server-only";
 
 import { ConfidentialClientApplication } from "@azure/msal-node";
 import { fetchWithTimeout, HttpTimeoutError } from "@/app/lib/http";
+import { requireRuntimeEnv } from "@/app/lib/runtime-env";
 
 export type DataverseErrorType =
   | "not_configured"
@@ -32,20 +33,20 @@ const DATAVERSE_TOKEN_TTL_FALLBACK_SECONDS = 55 * 60;
 let cachedToken: string | null = null;
 let cachedTokenExpiresAt = 0;
 let tokenPromise: Promise<string> | null = null;
-let msalClient: ConfidentialClientApplication | null = null;
+let msalClient: { cacheKey: string; client: ConfidentialClientApplication } | null = null;
 
-function getBaseUrl(): string {
-  const baseUrl = process.env.DATAVERSE_BASE_URL?.trim().replace(/\/+$/, "") || "";
+async function getBaseUrl(): Promise<string> {
+  const baseUrl = (await requireRuntimeEnv("DATAVERSE_BASE_URL")).trim().replace(/\/+$/, "");
   if (!baseUrl) {
     throw new DataverseError("DATAVERSE_BASE_URL must be set", "not_configured");
   }
   return baseUrl;
 }
 
-function getEntraConfig() {
-  const tenantId = process.env.ENTRA_TENANT_ID?.trim() || "";
-  const clientId = process.env.ENTRA_CLIENT_ID?.trim() || "";
-  const clientSecret = process.env.ENTRA_CLIENT_SECRET?.trim() || "";
+async function getEntraConfig() {
+  const tenantId = (await requireRuntimeEnv("ENTRA_TENANT_ID")).trim();
+  const clientId = (await requireRuntimeEnv("ENTRA_CLIENT_ID")).trim();
+  const clientSecret = (await requireRuntimeEnv("ENTRA_CLIENT_SECRET")).trim();
 
   if (!tenantId || !clientId || !clientSecret) {
     throw new DataverseError(
@@ -57,18 +58,24 @@ function getEntraConfig() {
   return { tenantId, clientId, clientSecret };
 }
 
-function getMsalClient(): ConfidentialClientApplication {
-  if (msalClient) return msalClient;
+async function getMsalClient(): Promise<ConfidentialClientApplication> {
+  const { tenantId, clientId, clientSecret } = await getEntraConfig();
+  const baseUrl = await getBaseUrl();
+  const cacheKey = `${tenantId}:${clientId}:${clientSecret}:${baseUrl}`;
+  if (msalClient?.cacheKey === cacheKey) return msalClient.client;
 
-  const { tenantId, clientId, clientSecret } = getEntraConfig();
-  msalClient = new ConfidentialClientApplication({
+  cachedToken = null;
+  cachedTokenExpiresAt = 0;
+  tokenPromise = null;
+  const client = new ConfidentialClientApplication({
     auth: {
       clientId,
       authority: `https://login.microsoftonline.com/${tenantId}`,
       clientSecret,
     },
   });
-  return msalClient;
+  msalClient = { cacheKey, client };
+  return client;
 }
 
 function classifyDataverseError(error: unknown): DataverseErrorType {
@@ -116,8 +123,8 @@ async function acquireTokenInternal(): Promise<string> {
     return cachedToken;
   }
 
-  const client = getMsalClient();
-  const scope = `${getBaseUrl()}/.default`;
+  const client = await getMsalClient();
+  const scope = `${await getBaseUrl()}/.default`;
   const result = await client.acquireTokenByClientCredential({ scopes: [scope] });
 
   const accessToken = result?.accessToken;
@@ -164,8 +171,8 @@ async function fetchDataverse(
   );
 }
 
-function buildODataUrl(entitySet: string, select?: string | null, filter?: string | null, top?: number | null): string {
-  const url = new URL(`${getBaseUrl()}/api/data/v9.2/${entitySet}`);
+async function buildODataUrl(entitySet: string, select?: string | null, filter?: string | null, top?: number | null): Promise<string> {
+  const url = new URL(`${await getBaseUrl()}/api/data/v9.2/${entitySet}`);
   if (select) url.searchParams.set("$select", select);
   if (filter) url.searchParams.set("$filter", filter);
   if (top) url.searchParams.set("$top", String(top));
@@ -184,7 +191,7 @@ export async function fetchDataverseTable(
   };
 
   const allRows: DataverseRow[] = [];
-  let nextUrl: string | null = buildODataUrl(entitySet, options.select, options.filter, options.top);
+  let nextUrl: string | null = await buildODataUrl(entitySet, options.select, options.filter, options.top);
 
   while (nextUrl) {
     let response: Response;
@@ -221,7 +228,7 @@ export async function patchDataverseRow(
     "Content-Type": "application/json",
     "If-Match": "*",
   };
-  const url = `${getBaseUrl()}/api/data/v9.2/${entitySet}(${rowId})`;
+  const url = `${await getBaseUrl()}/api/data/v9.2/${entitySet}(${rowId})`;
 
   let response: Response;
   try {

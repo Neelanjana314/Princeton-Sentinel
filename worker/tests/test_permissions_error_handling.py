@@ -93,12 +93,12 @@ class PermissionErrorHandlingTests(unittest.TestCase):
         self.assertEqual(state["details"]["attempt_in_run"], 2)
 
     @patch("builtins.print")
-    def test_print_drive_listing_failure_includes_request_url_and_target_context(self, mock_print):
+    def test_print_drive_listing_failure_does_not_log_context_values(self, mock_print):
         error = GraphError(
             423,
             "Graph error 423: blocked",
             "https://graph.microsoft.com/v1.0/groups/group-1/drives?$top=200",
-            '{"error":{"code":"notAllowed","message":"Access to this site has been blocked."}}',
+            '{"error":{"code":"notAllowed","message":"Access to this site has been blocked.","secret":"plain-text-secret"}}',
         )
 
         _print_drive_listing_failure(
@@ -110,10 +110,12 @@ class PermissionErrorHandlingTests(unittest.TestCase):
 
         mock_print.assert_called_once()
         printed = mock_print.call_args.args[0]
-        self.assertIn('"target_kind": "group"', printed)
-        self.assertIn('"target_id": "group-1"', printed)
-        self.assertIn('"request_url": "https://graph.microsoft.com/v1.0/groups/group-1/drives?$top=200"', printed)
-        self.assertIn('"group_name": "Blocked Site Group"', printed)
+        self.assertEqual("[graph_ingest] drive listing failure", printed)
+        self.assertNotIn("group-1", printed)
+        self.assertNotIn("Blocked Site Group", printed)
+        self.assertNotIn("plain-text-secret", printed)
+        self.assertNotIn("request_url", printed)
+        self.assertNotIn("response_text", printed)
 
     def test_blocked_site_graph_error_is_detected(self):
         error = GraphError(

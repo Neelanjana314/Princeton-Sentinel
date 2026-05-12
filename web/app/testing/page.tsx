@@ -29,7 +29,7 @@ async function TestingPageContent() {
   }
 
   const userLabel = session.user?.name ?? session.user?.email ?? "Signed in";
-  const canAdmin = isAdmin(groups);
+  const canAdmin = await isAdmin(groups);
   const emulateLicenseEnabled = localTestingMenuState.emulateLicenseEnabled;
 
   return (

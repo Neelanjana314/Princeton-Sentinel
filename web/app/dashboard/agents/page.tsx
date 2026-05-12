@@ -46,7 +46,7 @@ function formatAllFilter(value: string, allLabel: string) {
 async function AgentsPage({ searchParams }: { searchParams?: Promise<SearchParams> }) {
   const { groups } = await requireUser();
   await redirectIfFeatureDisabled("agents_dashboard");
-  const adminUser = isAdmin(groups);
+  const adminUser = await isAdmin(groups);
 
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
 
